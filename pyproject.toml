@@ -1,11 +1,28 @@
 [project]
 name = "pyleak"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.1"
+description = "Detect leaked asyncio tasks in Python. Inspired by Go's goleak"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
+authors = [
+    { name = "Deepankar Mahapatro", email = "deepankarmahapatro@gmail.com" },
+]
+keywords = [
+    "asyncio", 
+    "testing", 
+    "leak", 
+    "goleak",
+    "async",
+    "tasks",
+    "threads",
+    "pytest"
+]
 
+[project.urls]
+"Homepage" = "https://github.com/deepankarm/pyleak"
+"Repository" = "https://github.com/deepankarm/pyleak"
+"Issues" = "https://github.com/deepankarm/pyleak/issues"
 
 [build-system]
 requires = ["hatchling"]

@@ -8,11 +8,11 @@ inspired by Go's goleak package.
 import asyncio
 import logging
 import re
-import warnings
 from enum import Enum
 from functools import wraps
 from typing import List, Optional, Set, Union
 
+from pyleak.base import LeakError, _BaseLeakContextManager, _BaseLeakDetector
 from pyleak.utils import setup_logger
 
 _logger = setup_logger(__name__)
@@ -27,48 +27,21 @@ class LeakAction(str, Enum):
     RAISE = "raise"
 
 
-class TaskLeakError(Exception):
+class TaskLeakError(LeakError):
     """Raised when task leaks are detected and action is set to RAISE."""
 
     pass
 
 
-class _TaskLeakDetector:
+class _TaskLeakDetector(_BaseLeakDetector):
     """Core task leak detection functionality."""
 
-    def __init__(
-        self,
-        action: LeakAction = LeakAction.WARN,
-        name_filter: Optional[Union[str, re.Pattern]] = None,
-        logger: Optional[logging.Logger] = _logger,
-    ):
-        self.action = action
-        self.name_filter = name_filter
-        self.logger = logger
-
-    def _matches_filter(self, task_name: str) -> bool:
-        """Check if task name matches the filter."""
-        if self.name_filter is None:
-            return True
-
-        if isinstance(self.name_filter, str):
-            return task_name == self.name_filter
-        elif isinstance(self.name_filter, re.Pattern):
-            return bool(self.name_filter.search(task_name))
-        else:
-            # Try to compile as regex if it's a string-like pattern
-            try:
-                pattern = re.compile(str(self.name_filter))
-                return bool(pattern.search(task_name))
-            except re.error:
-                return task_name == str(self.name_filter)
-
-    def _get_task_name(self, task: asyncio.Task) -> str:
+    def _get_resource_name(self, task: asyncio.Task) -> str:
         """Get task name, handling both named and unnamed tasks."""
         name = getattr(task, "_name", None) or task.get_name()
         return name if name else f"<unnamed-{id(task)}>"
 
-    def get_running_tasks(self, exclude_current: bool = True) -> Set[asyncio.Task]:
+    def get_running_resources(self, exclude_current: bool = True) -> Set[asyncio.Task]:
         """Get all currently running tasks."""
         tasks = asyncio.all_tasks()
 
@@ -82,68 +55,61 @@ class _TaskLeakDetector:
 
         return tasks
 
-    def get_leaked_tasks(self, initial_tasks: Set[asyncio.Task]) -> List[asyncio.Task]:
-        """Find tasks that are still running and match the filter."""
-        current_tasks = self.get_running_tasks()
-        new_tasks = current_tasks - initial_tasks
+    def _is_resource_active(self, task: asyncio.Task) -> bool:
+        """Check if a task is still active/running."""
+        return not task.done()
 
-        leaked_tasks = []
-        for task in new_tasks:
+    def _get_leak_error_class(self) -> type:
+        """Get the appropriate exception class for task leaks."""
+        return TaskLeakError
+
+    def _get_resource_type_name(self) -> str:
+        """Get the human-readable name for tasks."""
+        return "asyncio tasks"
+
+    def _handle_cancel_action(
+        self, leaked_tasks: List[asyncio.Task], task_names: List[str]
+    ) -> None:
+        """Handle the cancel action for leaked tasks."""
+        self.logger.debug(f"Cancelling {len(leaked_tasks)} leaked tasks: {task_names}")
+        for task in leaked_tasks:
             if not task.done():
-                task_name = self._get_task_name(task)
-                if self._matches_filter(task_name):
-                    leaked_tasks.append(task)
+                task.cancel()
 
-        return leaked_tasks
+    # Keep the original method names for backward compatibility
+    def get_running_tasks(self, exclude_current: bool = True) -> Set[asyncio.Task]:
+        """Get all currently running tasks. (Alias for get_running_resources)"""
+        return self.get_running_resources(exclude_current)
+
+    def get_leaked_tasks(self, initial_tasks: Set[asyncio.Task]) -> List[asyncio.Task]:
+        """Find tasks that are still running and match the filter. (Alias for get_leaked_resources)"""
+        return self.get_leaked_resources(initial_tasks)
 
     def handle_leaked_tasks(self, leaked_tasks: List[asyncio.Task]) -> None:
-        """Handle detected leaked tasks based on the configured action."""
-        if not leaked_tasks:
-            return
-
-        task_names = [self._get_task_name(task) for task in leaked_tasks]
-        message = f"Detected {len(leaked_tasks)} leaked asyncio tasks: {task_names}"
-
-        if self.action == LeakAction.WARN:
-            warnings.warn(message, ResourceWarning, stacklevel=3)
-        elif self.action == LeakAction.LOG:
-            self.logger.warning(message)
-        elif self.action == LeakAction.CANCEL:
-            self.logger.info(
-                f"Cancelling {len(leaked_tasks)} leaked tasks: {task_names}"
-            )
-            for task in leaked_tasks:
-                if not task.done():
-                    task.cancel()
-        elif self.action == LeakAction.RAISE:
-            raise TaskLeakError(message)
+        """Handle detected leaked tasks. (Alias for handle_leaked_resources)"""
+        return self.handle_leaked_resources(leaked_tasks)
 
 
-class _AsyncTaskLeakContextManager:
+class _AsyncTaskLeakContextManager(_BaseLeakContextManager):
     """Async context manager that can also be used as a decorator."""
 
-    def __init__(
-        self,
-        action: LeakAction = LeakAction.WARN,
-        name_filter: Optional[Union[str, re.Pattern]] = None,
-        logger: Optional[logging.Logger] = _logger,
-    ):
-        self.action = action
-        self.name_filter = name_filter
-        self.logger = logger
+    def _create_detector(self) -> _TaskLeakDetector:
+        """Create a task leak detector instance."""
+        return _TaskLeakDetector(self.action, self.name_filter, self.logger)
+
+    async def _wait_for_completion(self) -> None:
+        """Wait for tasks to complete naturally."""
+        await asyncio.sleep(0.01)
 
     async def __aenter__(self):
-        self.detector = _TaskLeakDetector(self.action, self.name_filter, self.logger)
-        self.initial_tasks = self.detector.get_running_tasks()
-        self.logger.debug(f"Detected {len(self.initial_tasks)} initial tasks")
-        return self
+        return self._enter_context()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # Small delay to allow tasks to complete
-        await asyncio.sleep(0.01)
-        leaked_tasks = self.detector.get_leaked_tasks(self.initial_tasks)
-        self.logger.debug(f"Detected {len(leaked_tasks)} leaked tasks")
-        self.detector.handle_leaked_tasks(leaked_tasks)
+        await self._wait_for_completion()
+
+        leaked_resources = self.detector.get_leaked_resources(self.initial_resources)
+        self.logger.debug(f"Detected {len(leaked_resources)} leaked asyncio tasks")
+        self.detector.handle_leaked_resources(leaked_resources)
 
     def __call__(self, func):
         """Allow this context manager to be used as a decorator."""
@@ -157,7 +123,7 @@ class _AsyncTaskLeakContextManager:
 
 
 def no_task_leaks(
-    action: LeakAction = LeakAction.WARN,
+    action: Union[LeakAction, str] = LeakAction.WARN,
     name_filter: Optional[Union[str, re.Pattern]] = None,
     logger: Optional[logging.Logger] = _logger,
 ):
@@ -179,4 +145,8 @@ def no_task_leaks(
         async def my_function():
             await some_async_function()
     """
+    # Convert enum to string if needed
+    if isinstance(action, LeakAction):
+        action = action.value
+
     return _AsyncTaskLeakContextManager(action, name_filter, logger)

@@ -1,0 +1,161 @@
+"""
+Base classes for leak detection functionality.
+"""
+
+import logging
+import re
+import warnings
+from abc import ABC, abstractmethod
+from typing import Any, List, Optional, Set, Union
+
+from pyleak.utils import setup_logger
+
+_logger = setup_logger(__name__)
+
+
+class LeakError(Exception):
+    """Base exception for leak detection errors."""
+
+
+class _BaseLeakDetector(ABC):
+    """Base class for leak detection functionality."""
+
+    def __init__(
+        self,
+        action: str = "warn",
+        name_filter: Optional[Union[str, re.Pattern]] = None,
+        logger: Optional[logging.Logger] = _logger,
+    ):
+        self.action = action
+        self.name_filter = name_filter
+        self.logger = logger
+
+    def _matches_filter(self, resource_name: str) -> bool:
+        """Check if resource name matches the filter."""
+        if self.name_filter is None:
+            return True
+
+        if isinstance(self.name_filter, str):
+            return resource_name == self.name_filter
+        elif isinstance(self.name_filter, re.Pattern):
+            return bool(self.name_filter.search(resource_name))
+        else:
+            # Try to compile as regex if it's a string-like pattern
+            try:
+                pattern = re.compile(str(self.name_filter))
+                return bool(pattern.search(resource_name))
+            except re.error:
+                return resource_name == str(self.name_filter)
+
+    @abstractmethod
+    def _get_resource_name(self, resource: Any) -> str:
+        """Get resource name, handling both named and unnamed resources."""
+        pass
+
+    @abstractmethod
+    def get_running_resources(self, exclude_current: bool = True) -> Set[Any]:
+        """Get all currently running resources."""
+        pass
+
+    @abstractmethod
+    def _is_resource_active(self, resource: Any) -> bool:
+        """Check if a resource is still active/running."""
+        pass
+
+    @abstractmethod
+    def _get_leak_error_class(self) -> type:
+        """Get the appropriate exception class for this resource type."""
+        pass
+
+    @abstractmethod
+    def _get_resource_type_name(self) -> str:
+        """Get the human-readable name for this resource type (e.g., 'tasks', 'threads')."""
+        pass
+
+    def get_leaked_resources(self, initial_resources: Set[Any]) -> List[Any]:
+        """Find resources that are still running and match the filter."""
+        current_resources = self.get_running_resources()
+        new_resources = current_resources - initial_resources
+
+        leaked_resources = []
+        for resource in new_resources:
+            if self._is_resource_active(resource):
+                resource_name = self._get_resource_name(resource)
+                if self._matches_filter(resource_name):
+                    leaked_resources.append(resource)
+
+        return leaked_resources
+
+    def handle_leaked_resources(self, leaked_resources: List[Any]) -> None:
+        """Handle detected leaked resources based on the configured action."""
+        if not leaked_resources:
+            return
+
+        resource_names = [self._get_resource_name(r) for r in leaked_resources]
+        resource_type = self._get_resource_type_name()
+        message = (
+            f"Detected {len(leaked_resources)} leaked {resource_type}: {resource_names}"
+        )
+
+        if self.action == "warn":
+            warnings.warn(message, ResourceWarning, stacklevel=3)
+        elif self.action == "log":
+            self.logger.warning(message)
+        elif self.action == "cancel":
+            self._handle_cancel_action(leaked_resources, resource_names)
+        elif self.action == "raise":
+            error_class = self._get_leak_error_class()
+            raise error_class(message)
+
+    @abstractmethod
+    def _handle_cancel_action(
+        self, leaked_resources: List[Any], resource_names: List[str]
+    ) -> None:
+        """Handle the cancel action for leaked resources."""
+        pass
+
+
+class _BaseLeakContextManager(ABC):
+    """Base context manager that can also be used as a decorator."""
+
+    def __init__(
+        self,
+        action: str = "warn",
+        name_filter: Optional[Union[str, re.Pattern]] = None,
+        logger: Optional[logging.Logger] = _logger,
+        **kwargs,
+    ):
+        self.action = action
+        self.name_filter = name_filter
+        self.logger = logger
+        self.extra_kwargs = kwargs
+
+    @abstractmethod
+    def _create_detector(self) -> _BaseLeakDetector:
+        """Create the appropriate detector instance."""
+        pass
+
+    @abstractmethod
+    def _wait_for_completion(self) -> None:
+        """Wait for resources to complete naturally."""
+        pass
+
+    def _enter_context(self):
+        """Common enter logic."""
+        self.detector = self._create_detector()
+        self.initial_resources = self.detector.get_running_resources()
+        resource_type = self.detector._get_resource_type_name()
+        self.logger.debug(
+            f"Detected {len(self.initial_resources)} initial {resource_type}"
+        )
+        return self
+
+    def _exit_context(self, exc_type, exc_val, exc_tb):
+        """Common exit logic."""
+        # Wait for resources to complete naturally
+        self._wait_for_completion()
+
+        leaked_resources = self.detector.get_leaked_resources(self.initial_resources)
+        resource_type = self.detector._get_resource_type_name()
+        self.logger.debug(f"Detected {len(leaked_resources)} leaked {resource_type}")
+        self.detector.handle_leaked_resources(leaked_resources)
