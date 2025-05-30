@@ -96,3 +96,5 @@ class TestMyApp:
         async with no_task_leaks(action="raise"):
             await my_async_operation()
 ```
+
+More examples can be found in the [tests](./tests/test_task_leaks.py).
