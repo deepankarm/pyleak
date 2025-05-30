@@ -13,16 +13,22 @@ pip install pyleak
 ### Context Manager
 
 ```python
+# script.py
 import asyncio
 from pyleak import no_task_leaks
 
 async def main():
     async with no_task_leaks():
         # This will detect any tasks that aren't properly awaited
-        asyncio.create_task(some_background_work())  # This would be flagged
+        asyncio.create_task(asyncio.sleep(10), name="my-task")  # This would be flagged
         await asyncio.sleep(0.1)
 
 asyncio.run(main())
+```
+
+```bash
+python -W always script.py
+# ResourceWarning: Detected 1 leaked asyncio tasks: ['my-task']
 ```
 
 ### Decorator
