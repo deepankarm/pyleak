@@ -311,7 +311,7 @@ class TestEdgeCases:
 
             async with no_task_leaks():
                 # Start task but it might complete during the detection window
-                task = asyncio.create_task(quick_task())
+                task = asyncio.create_task(quick_task())  # noqa: F841
                 await asyncio.sleep(0.005)  # Let it complete
 
             # Should not detect leak since task completed
@@ -337,5 +337,4 @@ async def cleanup_leaked_tasks():
             task.cancel()
 
     if tasks:
-        # Wait for cancellation to complete
         await asyncio.gather(*tasks, return_exceptions=True)
