@@ -210,14 +210,22 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         self.detector.start_monitoring()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args, **kwargs):
         self.detector.stop_monitoring()
         summary = self.detector.get_summary()
         if summary["total_blocks"] > 0:
             self.logger.debug(
                 f"Event loop monitoring summary: {summary['total_blocks']} block(s), "
-                f"{summary['total_blocked_time']:.3f}s total blocked time"
+                f"{summary['total_blocked_time']:.2f}s total blocked time"
             )
+        else:
+            self.logger.debug("No event loop blocks detected")
+
+    async def __aenter__(self):
+        return self.__enter__()
+
+    async def __aexit__(self, *args, **kwargs):
+        self.__exit__(*args, **kwargs)
 
     def __call__(self, func):
         """Allow this context manager to be used as a decorator."""
@@ -242,8 +250,8 @@ def no_event_loop_blocking(
     action: LeakAction = LeakAction.WARN,
     logger: Optional[logging.Logger] = _logger,
     *,
-    threshold: float = 0.1,
-    check_interval: float = 0.01,
+    threshold: float = 0.2,
+    check_interval: float = 0.05,
 ):
     """
     Context manager/decorator that detects event loop blocking within its scope.
