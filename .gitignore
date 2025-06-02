@@ -172,3 +172,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Repo-to-text
+.repo-to-text-settings.yaml
+repo-to-text_*.txt

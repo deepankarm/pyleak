@@ -63,11 +63,13 @@ class _ThreadLeakDetector(_BaseLeakDetector):
         """Check if a thread is still active/running."""
         return thread.is_alive()
 
-    def _get_leak_error_class(self) -> type:
+    @property
+    def leak_error_class(self) -> type:
         """Get the appropriate exception class for thread leaks."""
         return ThreadLeakError
 
-    def _get_resource_type_name(self) -> str:
+    @property
+    def resource_type(self) -> str:
         """Get the human-readable name for threads."""
         return "threads"
 
@@ -79,23 +81,6 @@ class _ThreadLeakDetector(_BaseLeakDetector):
             f"Cannot force-stop {len(leaked_threads)} leaked threads: {thread_names}. "
             "Consider using thread.join() or proper shutdown mechanisms."
         )
-
-    # Keep the original method names for backward compatibility
-    def get_running_threads(
-        self, exclude_current: bool = True
-    ) -> Set[threading.Thread]:
-        """Get all currently running threads. (Alias for get_running_resources)"""
-        return self.get_running_resources(exclude_current)
-
-    def get_leaked_threads(
-        self, initial_threads: Set[threading.Thread]
-    ) -> List[threading.Thread]:
-        """Find threads that are still running and match the filter. (Alias for get_leaked_resources)"""
-        return self.get_leaked_resources(initial_threads)
-
-    def handle_leaked_threads(self, leaked_threads: List[threading.Thread]) -> None:
-        """Handle detected leaked threads. (Alias for handle_leaked_resources)"""
-        return self.handle_leaked_resources(leaked_threads)
 
 
 class _ThreadLeakContextManager(_BaseLeakContextManager):

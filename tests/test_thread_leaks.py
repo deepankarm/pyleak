@@ -443,21 +443,14 @@ def cleanup_leaked_threads():
 
     yield
 
-    # Find threads created during test
     current_threads = set(threading.enumerate())
     new_threads = current_threads - initial_threads
-
-    # Clean up non-daemon threads by waiting a bit for them to finish
     non_daemon_threads = [t for t in new_threads if t.is_alive() and not t.daemon]
     if non_daemon_threads:
         # Give threads a chance to finish naturally
         time.sleep(0.5)
-
-        # Check if any are still running
         still_running = [t for t in non_daemon_threads if t.is_alive()]
         if still_running:
-            print(
-                f"Warning: {len(still_running)} threads still running after test cleanup:"
-            )
+            print(f"{len(still_running)} thread(s) still running after test cleanup:")
             for thread in still_running:
-                print(f"  - {thread.name} ({thread.ident})")
+                thread.join()

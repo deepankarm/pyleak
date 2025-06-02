@@ -72,14 +72,23 @@ class _BaseLeakDetector(ABC):
         """Check if a resource is still active/running."""
         pass
 
+    @property
     @abstractmethod
-    def _get_leak_error_class(self) -> type:
+    def leak_error_class(self) -> type:
         """Get the appropriate exception class for this resource type."""
         pass
 
+    @property
     @abstractmethod
-    def _get_resource_type_name(self) -> str:
+    def resource_type(self) -> str:
         """Get the human-readable name for this resource type (e.g., 'tasks', 'threads')."""
+        pass
+
+    @abstractmethod
+    def _handle_cancel_action(
+        self, leaked_resources: List[Any], resource_names: List[str]
+    ) -> None:
+        """Handle the cancel action for leaked resources."""
         pass
 
     def get_leaked_resources(self, initial_resources: Set[Any]) -> List[Any]:
@@ -102,11 +111,7 @@ class _BaseLeakDetector(ABC):
             return
 
         resource_names = [self._get_resource_name(r) for r in leaked_resources]
-        resource_type = self._get_resource_type_name()
-        message = (
-            f"Detected {len(leaked_resources)} leaked {resource_type}: {resource_names}"
-        )
-
+        message = f"Detected {len(leaked_resources)} leaked {self.resource_type}: {resource_names}"
         if self.action == "warn":
             warnings.warn(message, ResourceWarning, stacklevel=3)
         elif self.action == "log":
@@ -114,15 +119,8 @@ class _BaseLeakDetector(ABC):
         elif self.action == "cancel":
             self._handle_cancel_action(leaked_resources, resource_names)
         elif self.action == "raise":
-            error_class = self._get_leak_error_class()
+            error_class = self.leak_error_class
             raise error_class(message)
-
-    @abstractmethod
-    def _handle_cancel_action(
-        self, leaked_resources: List[Any], resource_names: List[str]
-    ) -> None:
-        """Handle the cancel action for leaked resources."""
-        pass
 
 
 class _BaseLeakContextManager(ABC):
@@ -154,9 +152,8 @@ class _BaseLeakContextManager(ABC):
         """Common enter logic."""
         self.detector = self._create_detector()
         self.initial_resources = self.detector.get_running_resources()
-        resource_type = self.detector._get_resource_type_name()
         self.logger.debug(
-            f"Detected {len(self.initial_resources)} initial {resource_type}"
+            f"Detected {len(self.initial_resources)} initial {self.detector.resource_type}"
         )
         return self
 
@@ -166,6 +163,7 @@ class _BaseLeakContextManager(ABC):
         self._wait_for_completion()
 
         leaked_resources = self.detector.get_leaked_resources(self.initial_resources)
-        resource_type = self.detector._get_resource_type_name()
-        self.logger.debug(f"Detected {len(leaked_resources)} leaked {resource_type}")
+        self.logger.debug(
+            f"Detected {len(leaked_resources)} leaked {self.detector.resource_type}"
+        )
         self.detector.handle_leaked_resources(leaked_resources)

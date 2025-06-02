@@ -54,11 +54,13 @@ class _TaskLeakDetector(_BaseLeakDetector):
         """Check if a task is still active/running."""
         return not task.done()
 
-    def _get_leak_error_class(self) -> type:
+    @property
+    def leak_error_class(self) -> type:
         """Get the appropriate exception class for task leaks."""
         return TaskLeakError
 
-    def _get_resource_type_name(self) -> str:
+    @property
+    def resource_type(self) -> str:
         """Get the human-readable name for tasks."""
         return "asyncio tasks"
 
@@ -70,19 +72,6 @@ class _TaskLeakDetector(_BaseLeakDetector):
         for task in leaked_tasks:
             if not task.done():
                 task.cancel()
-
-    # Keep the original method names for backward compatibility
-    def get_running_tasks(self, exclude_current: bool = True) -> Set[asyncio.Task]:
-        """Get all currently running tasks. (Alias for get_running_resources)"""
-        return self.get_running_resources(exclude_current)
-
-    def get_leaked_tasks(self, initial_tasks: Set[asyncio.Task]) -> List[asyncio.Task]:
-        """Find tasks that are still running and match the filter. (Alias for get_leaked_resources)"""
-        return self.get_leaked_resources(initial_tasks)
-
-    def handle_leaked_tasks(self, leaked_tasks: List[asyncio.Task]) -> None:
-        """Handle detected leaked tasks. (Alias for handle_leaked_resources)"""
-        return self.handle_leaked_resources(leaked_tasks)
 
 
 class _AsyncTaskLeakContextManager(_BaseLeakContextManager):
@@ -101,7 +90,6 @@ class _AsyncTaskLeakContextManager(_BaseLeakContextManager):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._wait_for_completion()
-
         leaked_resources = self.detector.get_leaked_resources(self.initial_resources)
         self.logger.debug(f"Detected {len(leaked_resources)} leaked asyncio tasks")
         self.detector.handle_leaked_resources(leaked_resources)
