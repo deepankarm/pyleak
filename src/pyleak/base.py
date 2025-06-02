@@ -6,11 +6,21 @@ import logging
 import re
 import warnings
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any, List, Optional, Set, Union
 
 from pyleak.utils import setup_logger
 
 _logger = setup_logger(__name__)
+
+
+class LeakAction(str, Enum):
+    """Actions to take when task leaks are detected."""
+
+    WARN = "warn"
+    LOG = "log"
+    CANCEL = "cancel"
+    RAISE = "raise"
 
 
 class LeakError(Exception):
@@ -22,7 +32,7 @@ class _BaseLeakDetector(ABC):
 
     def __init__(
         self,
-        action: str = "warn",
+        action: LeakAction = LeakAction.WARN,
         name_filter: Optional[Union[str, re.Pattern]] = None,
         logger: Optional[logging.Logger] = _logger,
     ):

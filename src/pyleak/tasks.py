@@ -8,23 +8,18 @@ inspired by Go's goleak package.
 import asyncio
 import logging
 import re
-from enum import Enum
 from functools import wraps
 from typing import List, Optional, Set, Union
 
-from pyleak.base import LeakError, _BaseLeakContextManager, _BaseLeakDetector
+from pyleak.base import (
+    LeakAction,
+    LeakError,
+    _BaseLeakContextManager,
+    _BaseLeakDetector,
+)
 from pyleak.utils import setup_logger
 
 _logger = setup_logger(__name__)
-
-
-class LeakAction(str, Enum):
-    """Actions to take when task leaks are detected."""
-
-    WARN = "warn"
-    LOG = "log"
-    CANCEL = "cancel"
-    RAISE = "raise"
 
 
 class TaskLeakError(LeakError):

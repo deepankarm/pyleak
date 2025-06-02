@@ -1,6 +1,6 @@
 [project]
 name = "pyleak"
-version = "0.1.1"
+version = "0.1.2"
 description = "Detect leaked asyncio tasks and threads in Python. Inspired by Go's goleak"
 readme = "README.md"
 requires-python = ">=3.9"

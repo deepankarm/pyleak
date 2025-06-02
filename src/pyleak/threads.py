@@ -10,7 +10,12 @@ import threading
 import time
 from typing import List, Optional, Set, Union
 
-from pyleak.base import LeakError, _BaseLeakContextManager, _BaseLeakDetector
+from pyleak.base import (
+    LeakAction,
+    LeakError,
+    _BaseLeakContextManager,
+    _BaseLeakDetector,
+)
 from pyleak.utils import setup_logger
 
 _logger = setup_logger(__name__)
@@ -25,7 +30,7 @@ class _ThreadLeakDetector(_BaseLeakDetector):
 
     def __init__(
         self,
-        action: str = "warn",
+        action: LeakAction = LeakAction.WARN,
         name_filter: Optional[Union[str, re.Pattern]] = None,
         logger: Optional[logging.Logger] = _logger,
         exclude_daemon: bool = True,
