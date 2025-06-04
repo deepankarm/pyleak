@@ -76,6 +76,101 @@ async def my_potentially_blocking_function():
     pass
 ```
 
+### Get stack trace from leaked asyncio tasks
+
+When using `no_task_leaks`, you get detailed stack trace information showing exactly where leaked tasks are executing and where they were created.
+
+
+```python
+import asyncio
+from pyleak import TaskLeakError, no_task_leaks
+
+async def leaky_function():
+    async def background_task():
+        print("background task started")
+        await asyncio.sleep(10)
+
+    print("creating a long running task")
+    asyncio.create_task(background_task())
+
+async def main():
+    try:
+        async with no_task_leaks(action="raise"):
+            await leaky_function()
+    except TaskLeakError as e:
+        print(e)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Output:
+
+```
+creating a long running task
+background task started
+Detected 1 leaked asyncio tasks
+
+Leaked Task: Task-2
+  ID: 4345977088
+  State: TaskState.RUNNING
+  Current Stack:
+    File "/tmp/example.py", line 9, in background_task
+        await asyncio.sleep(10)
+```
+
+
+#### Include creation stack trace
+
+You can also include the creation stack trace by passing `enable_creation_tracking=True` to `no_task_leaks`.
+
+```python
+async def main():
+    try:
+        async with no_task_leaks(action="raise", enable_creation_tracking=True):
+            await leaky_function()
+    except TaskLeakError as e:
+        print(e)
+```
+
+Output:
+
+```
+creating a long running task
+background task started
+Detected 1 leaked asyncio tasks
+
+Leaked Task: Task-2
+  ID: 4392245504
+  State: TaskState.RUNNING
+  Current Stack:
+    File "/tmp/example.py", line 9, in background_task
+        await asyncio.sleep(10)
+  Creation Stack:
+    File "/tmp/example.py", line 24, in <module>
+        asyncio.run(main())
+    File "/opt/homebrew/.../asyncio/runners.py", line 194, in run
+        return runner.run(main)
+    File "/opt/homebrew/.../asyncio/runners.py", line 118, in run
+        return self._loop.run_until_complete(task)
+    File "/opt/homebrew/.../asyncio/base_events.py", line 671, in run_until_complete
+        self.run_forever()
+    File "/opt/homebrew/.../asyncio/base_events.py", line 638, in run_forever
+        self._run_once()
+    File "/opt/homebrew/.../asyncio/base_events.py", line 1971, in _run_once
+        handle._run()
+    File "/opt/homebrew/.../asyncio/events.py", line 84, in _run
+        self._context.run(self._callback, *self._args)
+    File "/tmp/example.py", line 18, in main
+        await leaky_function()
+    File "/tmp/example.py", line 12, in leaky_function
+        asyncio.create_task(background_task())
+```
+
+`TaskLeakError` has a `leaked_tasks` attribute that contains a list of `LeakedTask` objects including the stack trace details.
+
+> Note: `enable_creation_tracking` monkey patches `asyncio.create_task` to include the creation stack trace. It is not recommended to be used in production to avoid unnecessary side effects.
+
 ## Actions
 
 Control what happens when leaks/blocking are detected:
@@ -212,6 +307,145 @@ async def test_background_task_cleanup():
         except asyncio.CancelledError:
             pass
 ```
+
+### Debugging complex task leaks
+
+```python
+import asyncio
+import random
+import re
+from pyleak import TaskLeakError, no_task_leaks
+
+async def debug_task_leaks():
+    """Example showing how to debug complex task leaks."""
+
+    async def worker(worker_id: int, sleep_time: int):
+        print(f"Worker {worker_id} starting")
+        await asyncio.sleep(sleep_time)  # Simulate work
+        print(f"Worker {worker_id} done")
+
+    async def spawn_workers():
+        for i in range(3):
+            asyncio.create_task(worker(i, random.randint(1, 10)), name=f"worker-{i}")
+
+    try:
+        async with no_task_leaks(
+            action="raise",
+            enable_creation_tracking=True,
+            name_filter=re.compile(r"worker-\d+"),  # Only catch worker tasks
+        ):
+            await spawn_workers()
+            await asyncio.sleep(0.1)  # Let workers start
+
+    except TaskLeakError as e:
+        print(f"\nFound {e.task_count} leaked worker tasks:")
+        for task_info in e.leaked_tasks:
+            print(f"\n--- {task_info.name} ---")
+            print("Currently executing:")
+            print(task_info.format_current_stack())
+            print("Created at:")
+            print(task_info.format_creation_stack())
+
+            # Cancel the leaked task
+            if task_info.task_ref:
+                task_info.task_ref.cancel()
+
+
+if __name__ == "__main__":
+    asyncio.run(debug_task_leaks())
+
+```
+
+
+<details>
+<summary><b>Toggle to see the output</b></summary>
+
+```
+Worker 0 starting
+Worker 1 starting
+Worker 2 starting
+
+Found 3 leaked worker tasks:
+
+--- worker-2 ---
+Currently executing:
+  File "/private/tmp/example.py", line 33, in worker
+    await asyncio.sleep(sleep_time)  # Simulate work
+
+Created at:
+  File "/private/tmp/example.py", line 65, in <module>
+    asyncio.run(debug_task_leaks())
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+    self.run_forever()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+    self._run_once()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+    handle._run()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+  File "/private/tmp/example.py", line 47, in debug_task_leaks
+    await spawn_workers()
+  File "/private/tmp/example.py", line 39, in spawn_workers
+    asyncio.create_task(worker(i, random.randint(1, 10)), name=f"worker-{i}")
+
+
+--- worker-0 ---
+Currently executing:
+  File "/private/tmp/example.py", line 33, in worker
+    await asyncio.sleep(sleep_time)  # Simulate work
+
+Created at:
+  File "/private/tmp/example.py", line 65, in <module>
+    asyncio.run(debug_task_leaks())
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+    self.run_forever()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+    self._run_once()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+    handle._run()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+  File "/private/tmp/example.py", line 47, in debug_task_leaks
+    await spawn_workers()
+  File "/private/tmp/example.py", line 39, in spawn_workers
+    asyncio.create_task(worker(i, random.randint(1, 10)), name=f"worker-{i}")
+
+
+--- worker-1 ---
+Currently executing:
+  File "/private/tmp/example.py", line 33, in worker
+    await asyncio.sleep(sleep_time)  # Simulate work
+
+Created at:
+  File "/private/tmp/example.py", line 65, in <module>
+    asyncio.run(debug_task_leaks())
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+    self.run_forever()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+    self._run_once()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+    handle._run()
+  File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+  File "/private/tmp/example.py", line 47, in debug_task_leaks
+    await spawn_workers()
+  File "/private/tmp/example.py", line 39, in spawn_workers
+    asyncio.create_task(worker(i, random.randint(1, 10)), name=f"worker-{i}")
+```
+
+</details>
 
 ## Why Use pyleak?
 

@@ -119,8 +119,7 @@ class _BaseLeakDetector(ABC):
         elif self.action == "cancel":
             self._handle_cancel_action(leaked_resources, resource_names)
         elif self.action == "raise":
-            error_class = self.leak_error_class
-            raise error_class(message)
+            raise self.leak_error_class(message)
 
 
 class _BaseLeakContextManager(ABC):

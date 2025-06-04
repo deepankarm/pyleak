@@ -214,12 +214,12 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         self.detector.stop_monitoring()
         summary = self.detector.get_summary()
         if summary["total_blocks"] > 0:
-            self.logger.debug(
+            self.logger.warning(
                 f"Event loop monitoring summary: {summary['total_blocks']} block(s), "
                 f"{summary['total_blocked_time']:.2f}s total blocked time"
             )
         else:
-            self.logger.debug("No event loop blocks detected")
+            self.logger.info("No event loop blocks detected")
 
     async def __aenter__(self):
         return self.__enter__()

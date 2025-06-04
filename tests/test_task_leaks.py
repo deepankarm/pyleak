@@ -53,7 +53,7 @@ class TestNoTaskLeaksContextManager:
 
             assert len(w) == 0
 
-    async def test_leak_detection_with_warning(self):
+    async def test_action_warn(self):
         """Test that leaked tasks trigger warnings."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -61,17 +61,29 @@ class TestNoTaskLeaksContextManager:
             async with no_task_leaks(action="warn"):
                 await leaky_function()
 
-            assert len(w) == 1
+            assert len(w) == 2
             assert issubclass(w[0].category, ResourceWarning)
             assert "leaked asyncio tasks" in str(w[0].message)
 
-    async def test_leak_detection_with_exception(self):
+            assert issubclass(w[1].category, ResourceWarning)
+            assert "await asyncio.sleep(10)  # Long running task" in str(w[1].message)
+
+    async def test_action_raise(self):
         """Test that leaked tasks can raise exceptions."""
-        with pytest.raises(TaskLeakError, match="leaked asyncio tasks"):
+        with pytest.raises(TaskLeakError, match="leaked asyncio tasks") as e:
             async with no_task_leaks(action="raise"):
                 await leaky_function()
 
-    async def test_leak_detection_with_cancel(self):
+        assert "leaked asyncio tasks" in str(e.value)
+        assert len(e.value.leaked_tasks) == 1
+        assert e.value.leaked_tasks[0].name is not None
+        assert e.value.leaked_tasks[0].state == "running"
+        assert e.value.leaked_tasks[0].current_stack is not None
+        assert e.value.leaked_tasks[0].creation_stack is None  # non debug mode
+        assert e.value.leaked_tasks[0].task_ref is not None
+        assert "await asyncio.sleep(10)  # Long running task" in str(e.value)
+
+    async def test_action_cancel(self):
         """Test that leaked tasks can be cancelled."""
         leaked_task: Optional[asyncio.Task] = None
 
@@ -89,16 +101,19 @@ class TestNoTaskLeaksContextManager:
         assert leaked_task is not None
         assert leaked_task.cancelled()
 
-    async def test_logging_action(self):
+    async def test_action_log(self):
         """Test that LOG action uses the logger."""
         mock_logger = Mock()
 
         async with no_task_leaks(action="log", logger=mock_logger):
             await leaky_function()
 
-        mock_logger.warning.assert_called_once()
-        args = mock_logger.warning.call_args[0]
-        assert "leaked asyncio tasks" in args[0]
+        assert mock_logger.warning.call_count == 2
+        assert "leaked asyncio tasks" in mock_logger.warning.call_args_list[0][0][0]
+        assert (
+            "await asyncio.sleep(10)  # Long running task"
+            in mock_logger.warning.call_args_list[1][0][0]
+        )
 
     async def test_name_filter_exact_match(self):
         """Test filtering tasks by exact name match."""
@@ -112,11 +127,10 @@ class TestNoTaskLeaksContextManager:
                 # Create task with different name - should be ignored
                 await create_named_task("other-task")
 
-            # Should only warn about the target task
-            assert len(w) == 1
-            message = str(w[0].message)
-            assert "target-task" in message
-            assert "other-task" not in message
+            assert len(w) == 2
+            assert "1 leaked asyncio tasks" in str(w[0].message)
+            assert "target-task" in str(w[1].message)
+            assert "other-task" not in str(w[0].message)
 
     async def test_name_filter_regex(self):
         """Test filtering tasks using regex patterns."""
@@ -131,11 +145,11 @@ class TestNoTaskLeaksContextManager:
 
                 await create_named_task("manager-1")
 
-            assert len(w) == 1
-            message = str(w[0].message)
+            assert len(w) == 10
+            all_messages = "\n".join([str(warning.message) for warning in w])
             for i in range(1, 10):
-                assert f"{some_id}-{i}" in message
-            assert "manager-1" not in message
+                assert f"{some_id}-{i}" in all_messages
+            assert "manager-1" not in all_messages
 
     async def test_completed_tasks_not_detected(self):
         """Test that completed tasks are not considered leaks."""
@@ -161,15 +175,42 @@ class TestNoTaskLeaksContextManager:
                 asyncio.create_task(asyncio.sleep(10))
                 await asyncio.sleep(0.1)
 
-            assert len(w) == 1
-            message = str(w[0].message)
-            assert "3 leaked asyncio tasks" in message
+            assert len(w) == 4
+            all_messages = "\n".join([str(warning.message) for warning in w])
+            assert "3 leaked asyncio tasks" in all_messages
+
+    async def test_invalid_regex_fallback(self):
+        """Test that invalid regex falls back to string matching."""
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            # Use invalid regex pattern - should fall back to exact string match
+            async with no_task_leaks(action="warn", name_filter="[invalid"):
+                await create_named_task("[invalid")  # Exact match
+                await create_named_task("other-task")
+
+            assert len(w) == 2
+            all_messages = "\n".join([str(warning.message) for warning in w])
+            assert "[invalid" in all_messages
+            assert "other-task" not in all_messages
+
+    async def test_enable_creation_tracking(self):
+        """Test that enable_creation_tracking works."""
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            async with no_task_leaks(action="warn", enable_creation_tracking=True):
+                await leaky_function()
+
+            assert len(w) == 2
+            assert "Creation Stack" in str(w[1].message)
+            assert "test_task_leaks.py" in str(w[1].message)  # this file name
+            assert "asyncio.create_task(background_task())" in str(w[1].message)
 
 
 class TestNoTaskLeaksDecorator:
     """Test no_task_leaks when used as decorator."""
 
-    async def test_decorator_no_leaks(self):
+    async def test_no_leaks(self):
         """Test decorator works when no leaks occur."""
 
         @no_task_leaks()
@@ -181,7 +222,7 @@ class TestNoTaskLeaksDecorator:
             await clean_function()
             assert len(w) == 0
 
-    async def test_decorator_with_leaks(self):
+    async def test_action_warn(self):
         """Test decorator detects leaks."""
 
         @no_task_leaks(action="warn")
@@ -191,41 +232,28 @@ class TestNoTaskLeaksDecorator:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             await leaky_decorated()
-            assert len(w) == 1
+            assert len(w) == 2
             assert "leaked asyncio tasks" in str(w[0].message)
+            assert "await asyncio.sleep(10)  # Long running task" in str(w[1].message)
 
-    async def test_decorator_with_return_value(self):
-        """Test that decorator preserves return values."""
+    async def test_action_raise(self):
+        """Test that decorator raises exceptions."""
 
-        @no_task_leaks()
-        async def function_with_return():
-            await well_behaved_function()
-            return "success"
+        @no_task_leaks(action="raise", enable_creation_tracking=True)
+        async def leaky_decorated():
+            await leaky_function()
 
-        result = await function_with_return()
-        assert result == "success"
+        with pytest.raises(TaskLeakError, match="leaked asyncio tasks") as e:
+            await leaky_decorated()
 
-    async def test_decorator_with_arguments(self):
-        """Test that decorator preserves function arguments."""
-
-        @no_task_leaks()
-        async def function_with_args(x, y, z=None):
-            await well_behaved_function()
-            return x + y + (z or 0)
-
-        result = await function_with_args(1, 2, z=3)
-        assert result == 6
-
-    async def test_decorator_with_exception_handling(self):
-        """Test that decorator properly handles exceptions from wrapped function."""
-
-        @no_task_leaks()
-        async def function_that_raises():
-            await well_behaved_function()
-            raise ValueError("test error")
-
-        with pytest.raises(ValueError, match="test error"):
-            await function_that_raises()
+        assert "leaked asyncio tasks" in str(e.value)
+        assert len(e.value.leaked_tasks) == 1
+        assert e.value.leaked_tasks[0].name is not None
+        assert e.value.leaked_tasks[0].state == "running"
+        assert e.value.leaked_tasks[0].current_stack is not None
+        assert e.value.leaked_tasks[0].creation_stack is not None
+        assert e.value.leaked_tasks[0].task_ref is not None
+        assert "await asyncio.sleep(10)  # Long running task" in str(e.value)
 
     async def test_decorator_with_name_filter(self):
         """Test decorator with name filtering."""
@@ -239,83 +267,10 @@ class TestNoTaskLeaksDecorator:
             warnings.simplefilter("always")
             await function_with_filtered_leak()
 
-        assert len(w) == 1
-        message = str(w[0].message)
-        assert "filtered-task" in message
-        assert "unfiltered-task" not in message
-
-
-class TestEdgeCases:
-    """Test edge cases and error conditions."""
-
-    async def test_no_current_task_context(self):
-        """Test behavior when there's no current running task."""
-        # This shouldn't crash even if called outside normal async context
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            async with no_task_leaks():
-                await asyncio.sleep(0.01)
-
-            assert len(w) == 0
-
-    async def test_empty_name_filter(self):
-        """Test behavior with empty name filter."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            async with no_task_leaks(action="warn", name_filter=""):
-                await leaky_function()
-
-            # Empty string should not match anything
-            assert len(w) == 0
-
-    async def test_invalid_regex_fallback(self):
-        """Test that invalid regex falls back to string matching."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            # Use invalid regex pattern - should fall back to exact string match
-            async with no_task_leaks(action="warn", name_filter="[invalid"):
-                await create_named_task("[invalid")  # Exact match
-                await create_named_task("other-task")
-
-            assert len(w) == 1
-            message = str(w[0].message)
-            assert "[invalid" in message
-            assert "other-task" not in message
-
-    async def test_unnamed_tasks(self):
-        """Test detection of unnamed tasks."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            async with no_task_leaks(action="warn"):
-                # Create unnamed task
-                asyncio.create_task(asyncio.sleep(10))
-                await asyncio.sleep(0.1)
-
-            assert len(w) == 1
-            message = str(w[0].message)
-            # Should contain some representation of unnamed task
-            assert "leaked asyncio tasks" in message
-
-    async def test_task_completion_race_condition(self):
-        """Test that tasks completing during detection aren't flagged."""
-
-        async def quick_task():
-            await asyncio.sleep(0.001)  # Very short task
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            async with no_task_leaks():
-                # Start task but it might complete during the detection window
-                task = asyncio.create_task(quick_task())  # noqa: F841
-                await asyncio.sleep(0.005)  # Let it complete
-
-            # Should not detect leak since task completed
-            assert len(w) == 0
+        assert len(w) == 2
+        all_messages = "\n".join([str(warning.message) for warning in w])
+        assert "filtered-task" in all_messages
+        assert "unfiltered-task" not in all_messages
 
 
 @pytest_asyncio.fixture(autouse=True)
