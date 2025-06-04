@@ -29,7 +29,7 @@ async def good_sleep_with_warning():
 
 
 class TestEventLoopBlockingDecorator:
-    async def test_no_event_loop_blocking(self):
+    async def test_no_blocking(self):
         """Test that no warnings are issued when no event loop blocking is detected."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -37,26 +37,36 @@ class TestEventLoopBlockingDecorator:
             await good_sleep_with_warning()
             assert len(w) == 0
 
-    async def test_event_loop_blocking_with_warning(self):
+    async def test_action_warning(self):
         """Test that event loop blocking triggers warnings."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
 
             await bad_sleep_with_warning()
-            assert len(w) > 0
+            assert len(w) == 3
             assert issubclass(w[0].category, ResourceWarning)
             assert "Event loop blocked for" in str(w[0].message)
+            assert "Detected 1 event loop blocks" in str(w[1].message)
+            assert "bad_sleep_with_warning" in str(w[2].message)
+            assert "time.sleep(1)" in str(w[2].message)
 
-    async def test_event_loop_blocking_with_exception(self):
+    async def test_action_raise(self):
         """Test that event loop blocking triggers exceptions."""
         with pytest.raises(EventLoopBlockError) as exc_info:
             await bad_sleep_with_exception()
 
-        assert "Event loop blocked for" in str(exc_info.value)
+        assert len(exc_info.value.blocking_events) == 1
+        blocking_event = exc_info.value.blocking_events[0]
+        assert blocking_event.block_id == 1
+        assert blocking_event.duration > 0.0
+        assert blocking_event.timestamp > 0.0
+        blocking_stack = blocking_event.format_blocking_stack()
+        assert "bad_sleep_with_exception" in blocking_stack
+        assert "time.sleep(1)" in blocking_stack
 
 
 class TestEventLoopBlockingContextManager:
-    async def test_good_sleep_with_warning(self):
+    async def test_no_blocking(self):
         """Test that no warnings are issued when no event loop blocking is detected."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -66,7 +76,7 @@ class TestEventLoopBlockingContextManager:
 
             assert len(w) == 0
 
-    async def test_bad_sleep_with_warning(self):
+    async def test_action_warning(self):
         """Test that event loop blocking triggers warnings."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -74,17 +84,25 @@ class TestEventLoopBlockingContextManager:
             async with no_event_loop_blocking(action="warn"):
                 time.sleep(1)
 
-            assert len(w) > 0
+            assert len(w) == 3
             assert issubclass(w[0].category, ResourceWarning)
             assert "Event loop blocked for" in str(w[0].message)
+            assert "Detected 1 event loop blocks" in str(w[1].message)
+            assert "time.sleep(1)" in str(w[2].message)
 
-    async def test_bad_sleep_with_exception(self):
+    async def test_action_raise(self):
         """Test that event loop blocking triggers exceptions."""
         with pytest.raises(EventLoopBlockError) as exc_info:
             async with no_event_loop_blocking(action="raise"):
                 time.sleep(1)
 
-        assert "Event loop blocked for" in str(exc_info.value)
+        assert len(exc_info.value.blocking_events) == 1
+        blocking_event = exc_info.value.blocking_events[0]
+        assert blocking_event.block_id == 1
+        assert blocking_event.duration > 0.0
+        assert blocking_event.timestamp > 0.0
+        blocking_stack = blocking_event.format_blocking_stack()
+        assert "time.sleep(1)" in blocking_stack
 
 
 @pytest.fixture
@@ -123,24 +141,28 @@ async def my_function_using_async_client(async_client: httpx.AsyncClient):
 
 
 class TestEventLoopBlockingWithHTTPRequests:
-    async def test_event_loop_blocking_with_sync_client(
-        self, sync_client, async_client
-    ):
+    async def test_sync_client(self, sync_client, async_client):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
 
             async with no_event_loop_blocking(action="warn", threshold=0.2):
                 await my_function_using_sync_client(sync_client)
 
-            assert len(w) > 0
+            assert len(w) > 10
             assert issubclass(w[0].category, ResourceWarning)
-            assert "Event loop blocked for" in str(w[0].message)
+            all_messages = "\n".join(str(w[i].message) for i in range(len(w)))
+            assert "Event loop blocked" in all_messages
+            assert "my_function_using_sync_client" in all_messages
+            assert (
+                "sync_client.get" in all_messages
+                or "httpx.AsyncClient.get" in all_messages
+            )
 
-    async def test_event_loop_blocking_with_async_client(self, async_client):
+    async def test_async_client(self, async_client):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
 
             async with no_event_loop_blocking(action="warn", threshold=0.2):
                 await my_function_using_async_client(async_client)
 
-            assert len(w) == 0
+            assert len(w) <= 1  # there might be one in the asyncio.run

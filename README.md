@@ -79,7 +79,9 @@ async def my_potentially_blocking_function():
     pass
 ```
 
-### Get stack trace from leaked asyncio tasks
+### Get stack trace 
+
+#### From leaked asyncio tasks
 
 When using `no_task_leaks`, you get detailed stack trace information showing exactly where leaked tasks are executing and where they were created.
 
@@ -173,6 +175,66 @@ Leaked Task: Task-2
 `TaskLeakError` has a `leaked_tasks` attribute that contains a list of `LeakedTask` objects including the stack trace details.
 
 > Note: `enable_creation_tracking` monkey patches `asyncio.create_task` to include the creation stack trace. It is not recommended to be used in production to avoid unnecessary side effects.
+
+#### From event loop blocks
+
+When using `no_event_loop_blocking`, you get detailed stack trace information showing exactly where the event loop is blocked and where the blocking code is executing.
+
+```python
+import asyncio
+import time
+
+from pyleak import EventLoopBlockError, no_event_loop_blocking
+
+
+async def some_function_with_blocking_code():
+    print("starting")
+    time.sleep(1)
+    print("done")
+
+
+async def main():
+    try:
+        async with no_event_loop_blocking(action="raise"):
+            await some_function_with_blocking_code()
+    except EventLoopBlockError as e:
+        print(e)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Output:
+
+```
+starting
+done
+Detected 1 event loop blocks
+
+Event Loop Block: block-1
+  Duration: 0.605s (threshold: 0.200s)
+  Timestamp: 1749051796.302
+  Blocking Stack:
+    File "/private/tmp/example.py", line 22, in <module>
+        asyncio.run(main())
+      File "/opt/homebrew/.../asyncio/runners.py", line 194, in run
+        return runner.run(main)
+      File "/opt/homebrew/.../asyncio/runners.py", line 118, in run
+        return self._loop.run_until_complete(task)
+      File "/opt/homebrew/.../asyncio/base_events.py", line 671, in run_until_complete
+        self.run_forever()
+      File "/opt/homebrew/.../asyncio/base_events.py", line 638, in run_forever
+        self._run_once()
+      File "/opt/homebrew/.../asyncio/base_events.py", line 1971, in _run_once
+        handle._run()
+      File "/opt/homebrew/.../asyncio/events.py", line 84, in _run
+        self._context.run(self._callback, *self._args)
+      File "/private/tmp/example.py", line 16, in main
+        await some_function_with_blocking_code()
+      File "/private/tmp/example.py", line 9, in some_function_with_blocking_code
+        time.sleep(1)
+```
 
 ## Actions
 
@@ -449,6 +511,173 @@ Created at:
 ```
 
 </details>
+
+### Debugging event loop blocking
+
+```python
+import asyncio
+from pyleak import EventLoopBlockError, no_event_loop_blocking
+
+async def process_user_data(user_id: int):
+    """Simulates cpu intensive work - contains blocking operations!"""
+    print(f"Processing user {user_id}...")
+    return sum(i * i for i in range(100_000_000))
+
+async def main():
+    try:
+        async with no_event_loop_blocking(action="raise", threshold=0.5):
+            user1 = await process_user_data(1)
+            user2 = await process_user_data(2)
+
+    except EventLoopBlockError as e:
+        print(f"\n🚨 Found {e.block_count} blocking events:")
+        print(e)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+
+<details>
+<summary><b>Toggle to see the output</b></summary>
+
+```
+Processing user 1...
+Processing user 2...
+
+🚨 Found 5 blocking events:
+Detected 5 event loop blocks
+
+Event Loop Block: block-1
+  Duration: 1.507s (threshold: 0.500s)
+  Timestamp: 1749052720.456
+  Blocking Stack:
+    File "/private/tmp/example.py", line 36, in <module>
+        asyncio.run(main())
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+        return runner.run(main)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+        return self._loop.run_until_complete(task)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+        self.run_forever()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+        self._run_once()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+        handle._run()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+        self._context.run(self._callback, *self._args)
+      File "/private/tmp/example.py", line 27, in main
+        user1 = await process_user_data(1)
+      File "/private/tmp/example.py", line 21, in process_user_data
+        return sum(i * i for i in range(100_000_000))
+      File "/private/tmp/example.py", line 21, in <genexpr>
+        return sum(i * i for i in range(100_000_000))
+Event Loop Block: block-2
+  Duration: 1.516s (threshold: 0.500s)
+  Timestamp: 1749052722.054
+  Blocking Stack:
+    File "/private/tmp/example.py", line 36, in <module>
+        asyncio.run(main())
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+        return runner.run(main)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+        return self._loop.run_until_complete(task)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+        self.run_forever()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+        self._run_once()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+        handle._run()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+        self._context.run(self._callback, *self._args)
+      File "/private/tmp/example.py", line 27, in main
+        user1 = await process_user_data(1)
+      File "/private/tmp/example.py", line 21, in process_user_data
+        return sum(i * i for i in range(100_000_000))
+      File "/private/tmp/example.py", line 21, in <genexpr>
+        return sum(i * i for i in range(100_000_000))
+Event Loop Block: block-3
+  Duration: 1.518s (threshold: 0.500s)
+  Timestamp: 1749052723.648
+  Blocking Stack:
+    File "/private/tmp/example.py", line 36, in <module>
+        asyncio.run(main())
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+        return runner.run(main)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+        return self._loop.run_until_complete(task)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+        self.run_forever()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+        self._run_once()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+        handle._run()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+        self._context.run(self._callback, *self._args)
+      File "/private/tmp/example.py", line 28, in main
+        user2 = await process_user_data(2)
+      File "/private/tmp/example.py", line 21, in process_user_data
+        return sum(i * i for i in range(100_000_000))
+      File "/private/tmp/example.py", line 21, in <genexpr>
+        return sum(i * i for i in range(100_000_000))
+Event Loop Block: block-4
+  Duration: 1.517s (threshold: 0.500s)
+  Timestamp: 1749052725.247
+  Blocking Stack:
+    File "/private/tmp/example.py", line 36, in <module>
+        asyncio.run(main())
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+        return runner.run(main)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+        return self._loop.run_until_complete(task)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+        self.run_forever()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+        self._run_once()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+        handle._run()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+        self._context.run(self._callback, *self._args)
+      File "/private/tmp/example.py", line 28, in main
+        user2 = await process_user_data(2)
+      File "/private/tmp/example.py", line 21, in process_user_data
+        return sum(i * i for i in range(100_000_000))
+      File "/private/tmp/example.py", line 21, in <genexpr>
+        return sum(i * i for i in range(100_000_000))
+Event Loop Block: block-5
+  Duration: 1.513s (threshold: 0.500s)
+  Timestamp: 1749052726.839
+  Blocking Stack:
+    File "/private/tmp/example.py", line 36, in <module>
+        asyncio.run(main())
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 194, in run
+        return runner.run(main)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/runners.py", line 118, in run
+        return self._loop.run_until_complete(task)
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+        self.run_forever()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+        self._run_once()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/base_events.py", line 1971, in _run_once
+        handle._run()
+      File "/opt/homebrew/anaconda3/envs/ffa/lib/python3.12/asyncio/events.py", line 84, in _run
+        self._context.run(self._callback, *self._args)
+      File "/private/tmp/example.py", line 28, in main
+        user2 = await process_user_data(2)
+      File "/private/tmp/example.py", line 21, in process_user_data
+        return sum(i * i for i in range(100_000_000))
+      File "/private/tmp/example.py", line 21, in <genexpr>
+        return sum(i * i for i in range(100_000_000))
+```
+</details>
+
+
+
+
+
+
+
+
 
 ## Why Use pyleak?
 
