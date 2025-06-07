@@ -314,6 +314,8 @@ class _AsyncTaskLeakContextManager(_BaseLeakContextManager):
         leaked_resources = self.detector.get_leaked_resources(self.initial_resources)
         self.logger.debug(f"Detected {len(leaked_resources)} leaked asyncio tasks")
         self.detector.handle_leaked_resources(leaked_resources)
+        if self.enable_creation_tracking:
+            disable_task_creation_tracking()
 
     def __call__(self, func):
         """Allow this context manager to be used as a decorator."""

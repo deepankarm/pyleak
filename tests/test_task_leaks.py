@@ -40,6 +40,11 @@ async def create_named_task(name: str):
     await asyncio.sleep(0.1)
 
 
+async def function_with_exception():
+    asyncio.create_task(asyncio.sleep(10))
+    raise Exception("test")
+
+
 class TestNoTaskLeaksContextManager:
     """Test no_task_leaks when used as context manager."""
 
@@ -193,6 +198,18 @@ class TestNoTaskLeaksContextManager:
             all_messages = "\n".join([str(warning.message) for warning in w])
             assert "[invalid" in all_messages
             assert "other-task" not in all_messages
+
+    async def test_enable_creation_tracking_with_exception(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with pytest.raises(Exception, match="test"):
+                async with no_task_leaks(action="warn", enable_creation_tracking=True):
+                    await function_with_exception()
+
+            all_warnings = "\n".join([str(warning.message) for warning in w])
+            assert len(w) == 2
+            assert "asyncio.create_task(asyncio.sleep(10))" in all_warnings
+            assert "test_task_leaks.py" in all_warnings
 
     async def test_enable_creation_tracking(self):
         """Test that enable_creation_tracking works."""
