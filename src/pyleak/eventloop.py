@@ -212,19 +212,49 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
         duration: float,
         blocking_stack: Optional[List[traceback.FrameSummary]] = None,
     ) -> None:
-        """Detect and handle a single blocking event."""
-        self.block_count += 1
-        self.total_blocked_time += duration
-        block_info = EventLoopBlock(
-            block_id=self.block_count,
-            duration=duration,
-            threshold=self.threshold,
-            timestamp=time.time(),
-            blocking_stack=blocking_stack,
-        )
+        """Detect and handle a single blocking event, combining consecutive identical blocks."""
+        current_time = time.time()
+        if self.detected_blocks and self._stacks_are_same(
+            self.detected_blocks[-1].blocking_stack, blocking_stack
+        ):
+            last_block = self.detected_blocks[-1]
+            last_block.duration += duration
+            last_block.timestamp = current_time
+            self.total_blocked_time += duration
+        else:
+            self.block_count += 1
+            self.total_blocked_time += duration
+            block_info = EventLoopBlock(
+                block_id=self.block_count,
+                duration=duration,
+                threshold=self.threshold,
+                timestamp=current_time,
+                blocking_stack=blocking_stack,
+            )
 
-        self.detected_blocks.append(block_info)
-        self._handle_single_block(block_info)
+            self.detected_blocks.append(block_info)
+            self._handle_single_block(block_info)
+
+    def _stacks_are_same(
+        self,
+        stack1: list[traceback.FrameSummary] | None,
+        stack2: list[traceback.FrameSummary] | None,
+    ) -> bool:
+        if stack1 is None and stack2 is None:
+            return True
+        if stack1 is None or stack2 is None:
+            return False
+        if len(stack1) != len(stack2):
+            return False
+
+        for frame1, frame2 in zip(stack1, stack2):
+            if (
+                frame1.filename != frame2.filename
+                or frame1.lineno != frame2.lineno
+                or frame1.name != frame2.name
+            ):
+                return False
+        return True
 
     def handle_detected_blocks(self) -> None:
         """Handle all detected blocks at the end of monitoring (similar to handle_leaked_resources)."""

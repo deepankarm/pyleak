@@ -148,15 +148,11 @@ class TestEventLoopBlockingWithHTTPRequests:
             async with no_event_loop_blocking(action="warn", threshold=0.2):
                 await my_function_using_sync_client(sync_client)
 
-            assert len(w) > 10
             assert issubclass(w[0].category, ResourceWarning)
             all_messages = "\n".join(str(w[i].message) for i in range(len(w)))
             assert "Event loop blocked" in all_messages
             assert "my_function_using_sync_client" in all_messages
-            assert (
-                "sync_client.get" in all_messages
-                or "httpx.AsyncClient.get" in all_messages
-            )
+            assert "sync_client.get" in all_messages
 
     async def test_async_client(self, async_client):
         with warnings.catch_warnings(record=True) as w:
