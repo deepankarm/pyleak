@@ -453,4 +453,5 @@ def cleanup_leaked_threads():
         if still_running:
             print(f"{len(still_running)} thread(s) still running after test cleanup:")
             for thread in still_running:
-                thread.join()
+                print(f"Thread {thread.name} is still running")
+                # thread.join()

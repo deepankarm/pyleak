@@ -317,6 +317,11 @@ class _AsyncTaskLeakContextManager(_BaseLeakContextManager):
         if self.enable_creation_tracking:
             disable_task_creation_tracking()
 
+    def __enter__(self):
+        raise RuntimeError(
+            "no_task_leaks cannot be used as a sync context manager, please use async with"
+        )
+
     def __call__(self, func):
         """Allow this context manager to be used as a decorator."""
 
@@ -366,16 +371,7 @@ def no_task_leaks(
                 if task_info.task_ref and not task_info.task_ref.done():
                     task_info.task_ref.cancel()
 
-    Note: For best stack trace information, enable asyncio debug mode:
-        asyncio.get_event_loop().set_debug(True)
-        # or
-        import asyncio
-        asyncio.run(main(), debug=True)
     """
-    # Convert enum to string if needed
-    if isinstance(action, LeakAction):
-        action = action.value
-
     return _AsyncTaskLeakContextManager(
         action, name_filter, logger, enable_creation_tracking
     )

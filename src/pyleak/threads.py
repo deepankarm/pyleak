@@ -108,12 +108,6 @@ class _ThreadLeakContextManager(_BaseLeakContextManager):
         """Wait for threads to complete naturally."""
         time.sleep(self.grace_period)
 
-    def __enter__(self):
-        return self._enter_context()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        return self._exit_context(exc_type, exc_val, exc_tb)
-
     def __call__(self, func):
         """Allow this context manager to be used as a decorator."""
 

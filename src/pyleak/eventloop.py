@@ -353,7 +353,6 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
 
     def __exit__(self, *args, **kwargs):
         self.detector.stop_monitoring()
-
         self.detector.handle_detected_blocks()
         summary = self.detector.get_summary()
         if summary["total_blocks"] > 0:

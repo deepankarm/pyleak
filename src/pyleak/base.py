@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, List, Optional, Set, Union
 
+from exceptiongroup import ExceptionGroup
+
 from pyleak.utils import setup_logger
 
 _logger = setup_logger(__name__)
@@ -25,6 +27,13 @@ class LeakAction(str, Enum):
 
 class LeakError(Exception):
     """Base exception for leak detection errors."""
+
+
+class PyleakExceptionGroup(ExceptionGroup, LeakError):
+    """Combined exception for multiple leak errors."""
+
+    def __init__(self, message: str, leak_errors: List[LeakError]):
+        super().__init__(message, leak_errors)
 
 
 class _BaseLeakDetector(ABC):
@@ -147,6 +156,12 @@ class _BaseLeakContextManager(ABC):
         """Wait for resources to complete naturally."""
         pass
 
+    def __enter__(self):
+        return self._enter_context()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self._exit_context(exc_type, exc_val, exc_tb)
+
     def _enter_context(self):
         """Common enter logic."""
         self.detector = self._create_detector()
@@ -158,11 +173,15 @@ class _BaseLeakContextManager(ABC):
 
     def _exit_context(self, exc_type, exc_val, exc_tb):
         """Common exit logic."""
-        # Wait for resources to complete naturally
         self._wait_for_completion()
-
         leaked_resources = self.detector.get_leaked_resources(self.initial_resources)
         self.logger.debug(
             f"Detected {len(leaked_resources)} leaked {self.detector.resource_type}"
         )
         self.detector.handle_leaked_resources(leaked_resources)
+
+    async def __aenter__(self):
+        return self._enter_context()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return self._exit_context(exc_type, exc_val, exc_tb)
