@@ -700,15 +700,6 @@ markers = [
 markers = no_leaks: detect asyncio task leaks, thread leaks, and event loop blocking
 ```
 
-### Usage
-
-```python
-@pytest.mark.no_leaks
-@pytest.mark.asyncio
-async def test_no_task_leaks():
-    asyncio.create_task(asyncio.sleep(10))
-```
-
 You can also add it to the `conftest.py` file.
 
 ```python
@@ -720,6 +711,15 @@ def pytest_configure(config):
         "markers", 
         "no_leaks: detect asyncio task leaks, thread leaks, and event loop blocking"
     )
+```
+
+### Usage
+
+```python
+@pytest.mark.no_leaks
+@pytest.mark.asyncio
+async def test_no_task_leaks():
+    asyncio.create_task(asyncio.sleep(10))
 ```
 
 ### Selective detection
