@@ -676,6 +676,30 @@ Event Loop Block: block-5
 
 The pytest plugin automatically wraps tests with pyleak detectors based on pytest markers.
 
+### Installation
+
+```bash
+pip install pyleak
+```
+
+### Add the plugin to your pytest configuration
+
+**pyproject.toml**
+
+```toml
+[tool.pytest.ini_options]
+markers = [
+    "no_leaks: detect asyncio task leaks, thread leaks, and event loop blocking"
+]
+```
+
+**pytest.ini**
+
+```ini
+[tool:pytest]
+markers = no_leaks: detect asyncio task leaks, thread leaks, and event loop blocking
+```
+
 ### Usage
 
 ```python
@@ -683,6 +707,19 @@ The pytest plugin automatically wraps tests with pyleak detectors based on pytes
 @pytest.mark.asyncio
 async def test_no_task_leaks():
     asyncio.create_task(asyncio.sleep(10))
+```
+
+You can also add it to the `conftest.py` file.
+
+```python
+# conftest.py
+import pytest
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", 
+        "no_leaks: detect asyncio task leaks, thread leaks, and event loop blocking"
+    )
 ```
 
 ### Selective detection
