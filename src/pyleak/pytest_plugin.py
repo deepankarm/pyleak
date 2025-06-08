@@ -37,7 +37,7 @@ def should_monitor_test(item: pytest.Function) -> PyLeakConfig | None:
     if not marker_args:
         marker_args = {"tasks": True, "threads": True, "blocking": True}
 
-    return PyLeakConfig(marker_args)
+    return PyLeakConfig.from_marker_args(marker_args)
 
 
 @pytest.hookimpl(hookwrapper=True)

@@ -672,11 +672,48 @@ Event Loop Block: block-5
 </details>
 
 
+## Pytest Plugin
 
+The pytest plugin automatically wraps tests with pyleak detectors based on pytest markers.
 
+### Usage
 
+```python
+@pytest.mark.no_leaks
+@pytest.mark.asyncio
+async def test_no_task_leaks():
+    asyncio.create_task(asyncio.sleep(10))
+```
 
+### Selective detection
 
+By default, all detectors are enabled. You can selectively enable or disable detectors using the `no_leaks` marker. For example, to only detect task leaks and event loop blocking, you can use the following:
+
+```python
+@pytest.mark.no_leaks(tasks=True, blocking=True, threads=False)
+@pytest.mark.asyncio
+async def test_async_no_leaks():
+    asyncio.create_task(asyncio.sleep(10))  # This will be detected
+    time.sleep(0.5)  # This will not be detected
+    threading.Thread(target=lambda: time.sleep(10)).start()  # This will not be detected
+```
+
+#### `no_leaks` marker configuration
+
+| Name | Default | Description |
+|:------|:------|:------|
+| tasks | True | Whether to detect task leaks |
+| task_action | raise | Action to take when a task leak is detected |
+| task_name_filter | None | Filter to apply to task names |
+| enable_task_creation_tracking | False | Whether to enable task creation tracking |
+| threads | True | Whether to detect thread leaks |
+| thread_action | raise | Action to take when a thread leak is detected |
+| thread_name_filter | None | Filter to apply to thread names |
+| exclude_daemon_threads | True | Whether to exclude daemon threads |
+| blocking | True | Whether to detect event loop blocking |
+| blocking_action | raise | Action to take when a blocking event loop is detected |
+| blocking_threshold | 0.1 | Threshold for blocking event loop detection |
+| blocking_check_interval | 0.01 | Interval for checking for blocking event loop |
 
 
 ## Why Use pyleak?
@@ -687,7 +724,7 @@ Event Loop Block: block-5
 
 **Event Loop Blocking**: Synchronous operations in async code destroy performance and can cause timeouts.
 
-`pyleak` helps you catch these issues during development and testing, before they reach production.
+`pyleak` helps you catch these issues during development and testing, optionally using a pytest plugin, before they reach production.
 
 ## Examples
 
@@ -695,6 +732,7 @@ More examples can be found in the test files:
 - [AsyncIO tasks tests](./tests/test_task_leaks.py) 
 - [Thread tests](./tests/test_thread_leaks.py)
 - [Event loop blocking tests](./tests/test_event_loop_blocking.py)
+- [Pytest plugin tests](./tests/test_plugin.py)
 
 ---
 

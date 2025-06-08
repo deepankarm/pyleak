@@ -50,7 +50,13 @@ async def test_blocking_detected():
     time.sleep(0.5)  # Intentional blocking
 
 
-# test where we only capture tasks but no thread and event loop blocking
+@pytest.mark.xfail(raises=PyleakExceptionGroup)
+@pytest.mark.no_leaks
+def test_sync_thread_leak_detected():
+    """This test should fail due to thread leak"""
+    threading.Thread(target=lambda: time.sleep(10)).start()  # Intentional leak
+
+
 @pytest.mark.no_leaks(tasks=True, threads=False, blocking=False)
 @pytest.mark.asyncio
 async def test_task_leak_detected_no_blocking():
