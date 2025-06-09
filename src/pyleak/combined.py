@@ -72,12 +72,12 @@ class PyLeakConfig:
         config.task_action = marker_args.get("task_action", "raise")
         config.task_name_filter = marker_args.get("task_name_filter", None)
         config.enable_task_creation_tracking = marker_args.get(
-            "enable_creation_tracking", False
+            "enable_task_creation_tracking", False
         )
         config.threads = marker_args.get("threads", True)
         config.thread_action = marker_args.get("thread_action", "raise")
         config.thread_name_filter = marker_args.get("thread_name_filter", None)
-        config.exclude_daemon_threads = marker_args.get("exclude_daemon", True)
+        config.exclude_daemon_threads = marker_args.get("exclude_daemon_threads", True)
 
         config.blocking = marker_args.get("blocking", True)
         config.blocking_action = marker_args.get("blocking_action", "raise")
