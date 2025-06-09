@@ -85,6 +85,7 @@ class PyLeakConfig:
         config.blocking_check_interval = marker_args.get(
             "blocking_check_interval", 0.01
         )
+        return config
 
     def to_markdown_table(self) -> str:
         """Generate markdown table from the above args including names and default values"""

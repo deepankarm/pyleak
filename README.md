@@ -731,7 +731,7 @@ By default, all detectors are enabled. You can selectively enable or disable det
 @pytest.mark.asyncio
 async def test_async_no_leaks():
     asyncio.create_task(asyncio.sleep(10))  # This will be detected
-    time.sleep(0.5)  # This will not be detected
+    time.sleep(0.5)  # This will be detected
     threading.Thread(target=lambda: time.sleep(10)).start()  # This will not be detected
 ```
 
