@@ -819,7 +819,7 @@ wheels = [
 
 [[package]]
 name = "pyleak"
-version = "0.1.8"
+version = "0.1.12"
 source = { editable = "." }
 dependencies = [
     { name = "exceptiongroup" },

@@ -271,6 +271,9 @@ class TestNoTaskLeaksDecorator:
         assert e.value.leaked_tasks[0].creation_stack is not None
         assert e.value.leaked_tasks[0].task_ref is not None
         assert "await asyncio.sleep(10)  # Long running task" in str(e.value)
+        assert "Creation Stack" in str(e.value)
+        assert "test_task_leaks.py" in str(e.value)
+        assert "asyncio.create_task(background_task())" in str(e.value)
 
     async def test_decorator_with_name_filter(self):
         """Test decorator with name filtering."""

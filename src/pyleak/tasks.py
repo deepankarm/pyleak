@@ -25,10 +25,6 @@ from pyleak.utils import setup_logger
 
 _logger = setup_logger(__name__)
 
-# Global registry to track task creation stacks
-_task_creation_stacks = {}
-_original_create_task = None
-
 
 class TaskState(str, Enum):
     """State of an asyncio task."""
@@ -169,9 +165,6 @@ class _TaskStackCapture:
         task: asyncio.Task,
     ) -> Optional[List[traceback.FrameSummary]]:
         """Get the creation stack for a task if available."""
-        if creation_stack := _task_creation_stacks.get(id(task)):
-            return creation_stack
-
         try:
             if hasattr(task, "_source_traceback") and task._source_traceback:
                 return task._source_traceback
@@ -181,48 +174,8 @@ class _TaskStackCapture:
         return None
 
 
-def enable_task_creation_tracking():
-    """Enable automatic tracking of task creation stacks."""
-    global _original_create_task
-    if _original_create_task is not None:
-        return
-
-    _original_create_task = asyncio.create_task
-
-    def tracked_create_task(coro, *, name=None, context=None):
-        if context is not None:
-            task = _original_create_task(coro, name=name, context=context)
-        else:
-            task = _original_create_task(coro, name=name)
-
-        creation_stack = _TaskStackCapture.capture_creation_stack()
-        _task_creation_stacks[id(task)] = creation_stack
-
-        task.add_done_callback(lambda _: _task_creation_stacks.pop(id(task), None))
-        return task
-
-    asyncio.create_task = tracked_create_task
-
-
-def disable_task_creation_tracking():
-    """Disable task creation tracking."""
-    global _original_create_task
-
-    if _original_create_task is not None:
-        asyncio.create_task = _original_create_task
-        _original_create_task = None
-        _task_creation_stacks.clear()
-
-
 class _TaskLeakDetector(_BaseLeakDetector):
     """Core task leak detection functionality with stack trace support."""
-
-    def __init__(
-        self, action, name_filter=None, logger=None, enable_creation_tracking=False
-    ):
-        super().__init__(action, name_filter, logger)
-        if enable_creation_tracking:
-            enable_task_creation_tracking()
 
     def _get_resource_name(self, task: asyncio.Task) -> str:
         """Get task name, handling both named and unnamed tasks."""
@@ -295,18 +248,42 @@ class _AsyncTaskLeakContextManager(_BaseLeakContextManager):
     ):
         super().__init__(action, name_filter, logger)
         self.enable_creation_tracking = enable_creation_tracking
+        self._original_loop_params = {
+            "debug": False,
+            "slow_callback_duration": 0.1,
+        }
 
     def _create_detector(self) -> _TaskLeakDetector:
         """Create a task leak detector instance."""
-        return _TaskLeakDetector(
-            self.action, self.name_filter, self.logger, self.enable_creation_tracking
+        return _TaskLeakDetector(self.action, self.name_filter, self.logger)
+
+    def enable_task_creation_tracking(self):
+        """Enable automatic tracking of task creation stacks."""
+        loop = asyncio.get_running_loop()
+        self._original_loop_params["debug"] = loop.get_debug()
+        self._original_loop_params["slow_callback_duration"] = (
+            loop.slow_callback_duration
         )
+        loop.set_debug(True)
+        loop.slow_callback_duration = 10
+        self.logger.debug("Debug mode enabled for task creation tracking")
+
+    def disable_task_creation_tracking(self):
+        """Disable task creation tracking."""
+        loop = asyncio.get_running_loop()
+        loop.set_debug(self._original_loop_params["debug"])
+        loop.slow_callback_duration = self._original_loop_params[
+            "slow_callback_duration"
+        ]
+        self.logger.debug("Debug mode disabled for task creation tracking")
 
     async def _wait_for_completion(self) -> None:
         """Wait for tasks to complete naturally."""
         await asyncio.sleep(0.01)
 
     async def __aenter__(self):
+        if self.enable_creation_tracking:
+            self.enable_task_creation_tracking()
         return self._enter_context()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -315,7 +292,7 @@ class _AsyncTaskLeakContextManager(_BaseLeakContextManager):
         self.logger.debug(f"Detected {len(leaked_resources)} leaked asyncio tasks")
         self.detector.handle_leaked_resources(leaked_resources)
         if self.enable_creation_tracking:
-            disable_task_creation_tracking()
+            self.disable_task_creation_tracking()
 
     def __enter__(self):
         raise RuntimeError(

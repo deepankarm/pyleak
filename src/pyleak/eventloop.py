@@ -361,7 +361,7 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
                 f"{summary['total_blocked_time']:.2f}s total blocked time"
             )
         else:
-            self.logger.info("No event loop blocks detected")
+            self.logger.debug("No event loop blocks detected")
 
     async def __aenter__(self):
         return self.__enter__()
