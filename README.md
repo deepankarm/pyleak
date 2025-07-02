@@ -1,7 +1,7 @@
 # pyleak
 
 <a href="https://pypi.org/project/pyleak/"><img alt="PyPI" src="https://img.shields.io/pypi/v/pyleak?label=Release&style=flat-square"></a>
-<a href="https://pepy.tech/projects/pyleak"><img src="https://static.pepy.tech/badge/pyleak/month" alt="PyPI Downloads"></a>
+<a href="https://pepy.tech/projects/pyleak"><img src="https://static.pepy.tech/badge/pyleak" alt="PyPI Downloads"></a>
 
 Detect leaked asyncio tasks, threads, and event loop blocking in Python. Inspired by Go's [goleak](https://github.com/uber-go/goleak).
 
