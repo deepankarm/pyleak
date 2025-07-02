@@ -19,6 +19,7 @@ from pyleak.base import (
 from pyleak.utils import setup_logger
 
 _logger = setup_logger(__name__)
+DEFAULT_THREAD_NAME_FILTER = re.compile(r"^(?!asyncio_\d+$).*")
 
 
 class ThreadLeakError(LeakError):
@@ -31,7 +32,7 @@ class _ThreadLeakDetector(_BaseLeakDetector):
     def __init__(
         self,
         action: LeakAction = LeakAction.WARN,
-        name_filter: Optional[Union[str, re.Pattern]] = None,
+        name_filter: Optional[Union[str, re.Pattern]] = DEFAULT_THREAD_NAME_FILTER,
         logger: Optional[logging.Logger] = _logger,
         exclude_daemon: bool = True,
     ):
@@ -89,7 +90,7 @@ class _ThreadLeakContextManager(_BaseLeakContextManager):
     def __init__(
         self,
         action: str = "warn",
-        name_filter: Optional[Union[str, re.Pattern]] = None,
+        name_filter: Optional[Union[str, re.Pattern]] = DEFAULT_THREAD_NAME_FILTER,
         logger: Optional[logging.Logger] = _logger,
         exclude_daemon: bool = True,
         grace_period: float = 0.1,
@@ -120,7 +121,7 @@ class _ThreadLeakContextManager(_BaseLeakContextManager):
 
 def no_thread_leaks(
     action: str = "warn",
-    name_filter: Optional[Union[str, re.Pattern]] = None,
+    name_filter: Optional[Union[str, re.Pattern]] = DEFAULT_THREAD_NAME_FILTER,
     logger: Optional[logging.Logger] = _logger,
     exclude_daemon: bool = True,
     grace_period: float = 0.1,

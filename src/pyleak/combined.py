@@ -10,6 +10,7 @@ from pyleak import (
     no_event_loop_blocking,
     no_task_leaks,
     no_thread_leaks,
+    DEFAULT_THREAD_NAME_FILTER,
 )
 from pyleak.base import PyleakExceptionGroup
 
@@ -41,7 +42,10 @@ class PyLeakConfig:
         metadata={"description": "Action to take when a thread leak is detected"},
     )
     thread_name_filter: str | None = field(
-        default=None, metadata={"description": "Filter to apply to thread names"}
+        default=DEFAULT_THREAD_NAME_FILTER,
+        metadata={
+            "description": "Filter to apply to thread names (default: exclude asyncio threads)"
+        },
     )
     exclude_daemon_threads: bool = field(
         default=True, metadata={"description": "Whether to exclude daemon threads"}
@@ -57,7 +61,7 @@ class PyLeakConfig:
         },
     )
     blocking_threshold: float = field(
-        default=0.1,
+        default=0.2,
         metadata={"description": "Threshold for blocking event loop detection"},
     )
     blocking_check_interval: float = field(
@@ -76,12 +80,14 @@ class PyLeakConfig:
         )
         config.threads = marker_args.get("threads", True)
         config.thread_action = marker_args.get("thread_action", "raise")
-        config.thread_name_filter = marker_args.get("thread_name_filter", None)
+        config.thread_name_filter = marker_args.get(
+            "thread_name_filter", DEFAULT_THREAD_NAME_FILTER
+        )
         config.exclude_daemon_threads = marker_args.get("exclude_daemon_threads", True)
 
         config.blocking = marker_args.get("blocking", True)
         config.blocking_action = marker_args.get("blocking_action", "raise")
-        config.blocking_threshold = marker_args.get("blocking_threshold", 0.1)
+        config.blocking_threshold = marker_args.get("blocking_threshold", 0.2)
         config.blocking_check_interval = marker_args.get(
             "blocking_check_interval", 0.01
         )

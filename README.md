@@ -745,11 +745,11 @@ async def test_async_no_leaks():
 | enable_task_creation_tracking | False | Whether to enable task creation tracking |
 | threads | True | Whether to detect thread leaks |
 | thread_action | raise | Action to take when a thread leak is detected |
-| thread_name_filter | None | Filter to apply to thread names |
+| thread_name_filter | r'^(?!asyncio_\\d+$).*' | Filter to apply to thread names (default: exclude asyncio threads) |
 | exclude_daemon_threads | True | Whether to exclude daemon threads |
 | blocking | True | Whether to detect event loop blocking |
 | blocking_action | raise | Action to take when a blocking event loop is detected |
-| blocking_threshold | 0.1 | Threshold for blocking event loop detection |
+| blocking_threshold | 0.2 | Threshold for blocking event loop detection |
 | blocking_check_interval | 0.01 | Interval for checking for blocking event loop |
 
 

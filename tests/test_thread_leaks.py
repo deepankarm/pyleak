@@ -1,3 +1,4 @@
+import asyncio
 import re
 import threading
 import time
@@ -55,6 +56,11 @@ def create_daemon_thread(name: str = "daemon-thread"):
     thread.daemon = True
     thread.start()
     time.sleep(0.1)
+
+
+def regular_sync_function():
+    time.sleep(1)
+    return "success"
 
 
 class TestNoThreadLeaksContextManager:
@@ -340,6 +346,17 @@ class TestNoThreadLeaksDecorator:
         message = str(w[0].message)
         assert "filtered-thread" in message
         assert "unfiltered-thread" not in message
+
+    @pytest.mark.asyncio
+    async def test_should_not_detect_asyncio_threads(self):
+        """Test that asyncio threads created using `asyncio.to_thread` are not detected."""
+
+        @no_thread_leaks(action="raise")
+        async def async_function():
+            return_value = await asyncio.to_thread(regular_sync_function)
+            assert return_value == "success"
+
+        await async_function()
 
 
 class TestEdgeCases:

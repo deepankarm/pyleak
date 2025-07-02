@@ -104,6 +104,9 @@ class _BaseLeakDetector(ABC):
         """Find resources that are still running and match the filter."""
         current_resources = self.get_running_resources()
         new_resources = current_resources - initial_resources
+        self.logger.debug(
+            f"Found {len(new_resources)} new {self.resource_type} before filtering"
+        )
 
         leaked_resources = []
         for resource in new_resources:
