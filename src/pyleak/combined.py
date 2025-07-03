@@ -4,15 +4,16 @@ from dataclasses import dataclass, field, fields
 from typing import Any
 
 from pyleak import (
+    DEFAULT_THREAD_NAME_FILTER,
     EventLoopBlockError,
     TaskLeakError,
     ThreadLeakError,
     no_event_loop_blocking,
     no_task_leaks,
     no_thread_leaks,
-    DEFAULT_THREAD_NAME_FILTER,
 )
 from pyleak.base import PyleakExceptionGroup
+from pyleak.utils import CallerContext
 
 
 @dataclass
@@ -106,12 +107,18 @@ class PyLeakConfig:
 
 
 class CombinedLeakDetector:
-    def __init__(self, config: PyLeakConfig, is_async: bool):
+    def __init__(
+        self,
+        config: PyLeakConfig,
+        is_async: bool,
+        caller_context: CallerContext | None = None,
+    ):
         self.config = config
         self.is_async = is_async
         self.task_detector = None
         self.thread_detector = None
         self.blocking_detector = None
+        self.caller_context = caller_context
 
     async def __aenter__(self):
         if self.is_async and self.config.tasks:
@@ -127,6 +134,7 @@ class CombinedLeakDetector:
                 action=self.config.blocking_action,
                 threshold=self.config.blocking_threshold,
                 check_interval=self.config.blocking_check_interval,
+                caller_context=self.caller_context,
             )
             self.blocking_detector.__enter__()
 

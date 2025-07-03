@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 from pyleak.combined import CombinedLeakDetector, PyLeakConfig
+from pyleak.utils import CallerContext
 
 
 def should_monitor_test(item: pytest.Function) -> PyLeakConfig | None:
@@ -51,11 +52,16 @@ def pytest_runtest_call(item: pytest.Function):
 
     is_async = asyncio.iscoroutinefunction(item.function)
     original_func = item.function
+    caller_context = CallerContext(
+        filename=item.fspath.strpath, name=item.name, lineno=None
+    )
 
     if is_async:
 
         async def async_wrapper(*args, **kwargs):
-            detector = CombinedLeakDetector(config, is_async=True)
+            detector = CombinedLeakDetector(
+                config=config, is_async=True, caller_context=caller_context
+            )
             async with detector:
                 return await original_func(*args, **kwargs)
 
@@ -63,7 +69,9 @@ def pytest_runtest_call(item: pytest.Function):
     else:
 
         def sync_wrapper(*args, **kwargs):
-            detector = CombinedLeakDetector(config, is_async=False)
+            detector = CombinedLeakDetector(
+                config=config, is_async=False, caller_context=caller_context
+            )
             with detector:
                 return original_func(*args, **kwargs)
 

@@ -10,12 +10,13 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import os
 import sys
 import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import Any, List, Optional, Set
+from typing import Any, Optional, Set
 
 from pyleak.base import (
     LeakAction,
@@ -23,9 +24,10 @@ from pyleak.base import (
     _BaseLeakContextManager,
     _BaseLeakDetector,
 )
-from pyleak.utils import setup_logger
+from pyleak.utils import CallerContext, find_my_caller, setup_logger
 
 _logger = setup_logger(__name__)
+_this_file_path = os.path.abspath(__file__)
 
 
 @dataclass
@@ -36,7 +38,7 @@ class EventLoopBlock:
     duration: float
     threshold: float
     timestamp: float
-    blocking_stack: Optional[List[traceback.FrameSummary]] = None
+    blocking_stack: list[traceback.FrameSummary] | None = None
 
     def format_blocking_stack(self) -> str:
         """Format the blocking stack trace as a string."""
@@ -68,7 +70,7 @@ class EventLoopBlock:
 class EventLoopBlockError(LeakError):
     """Raised when event loop blocking is detected and action is set to RAISE."""
 
-    def __init__(self, message: str, blocking_events: List[EventLoopBlock]):
+    def __init__(self, message: str, blocking_events: list[EventLoopBlock]):
         super().__init__(message)
         self.blocking_events = blocking_events
         self.block_count = len(blocking_events)
@@ -106,20 +108,22 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
         *,
         threshold: float = 0.1,
         check_interval: float = 0.01,
+        caller_context: CallerContext | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ):
         super().__init__(action=action, logger=logger)
         self.threshold = threshold
         self.check_interval = check_interval
+        self.caller_context = caller_context
         self.loop = loop or asyncio.get_running_loop()
 
         self.monitoring = False
-        self.threshold_multiplier = 3
+        self.threshold_multiplier = 1
         self.block_count = 0
         self.total_blocked_time = 0.0
         self.monitor_thread: Optional[_ThreadWithException] = None
         self.main_thread_id = threading.get_ident()
-        self.detected_blocks: List[EventLoopBlock] = []
+        self.detected_blocks: list[EventLoopBlock] = []
 
     def _get_resource_name(self, _: Any) -> str:
         """Get block description."""
@@ -144,7 +148,7 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
         return "event loop blocks"
 
     def _handle_cancel_action(
-        self, leaked_resources: List[dict], resource_names: List[str]
+        self, leaked_resources: list[dict], resource_names: list[str]
     ) -> None:
         """Handle the cancel action for detected blocks (just warn as blocks can't be cancelled)."""
         self.logger.warning(
@@ -152,13 +156,44 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
             "Consider using async alternatives to synchronous operations."
         )
 
-    def _capture_main_thread_stack(self) -> Optional[List[traceback.FrameSummary]]:
+    def _capture_main_thread_stack(self) -> list[traceback.FrameSummary] | None:
         """Capture the current stack trace of the main thread."""
         try:
             if frame := sys._current_frames().get(self.main_thread_id):
-                return traceback.extract_stack(frame)
+                stack = traceback.extract_stack(frame)
+                if self._matches_caller(stack):
+                    return stack
         except Exception as e:
             self.logger.debug(f"Failed to capture main thread stack: {e}")
+
+    def _matches_caller(self, stack: list[traceback.FrameSummary]) -> bool:
+        """Filter the stack to only include frames that have the original file in the filename."""
+        if not self.caller_context:
+            return True
+
+        # If the caller is not in the stack, return False
+        if not any(frame.filename == self.caller_context.filename for frame in stack):
+            return False
+
+        # this file might also trigger a block, so let's check if the last frame with `caller_context.filename`
+        # follows any frame with this filename `_this_file_path`. If so, return False.
+        last_caller_context_frame_idx = next(
+            (
+                idx
+                for idx, frame in reversed(list(enumerate(stack)))
+                if frame.filename == self.caller_context.filename
+            ),
+            None,
+        )
+        if last_caller_context_frame_idx is None:
+            return False
+        if any(
+            frame.filename == _this_file_path
+            for frame in stack[last_caller_context_frame_idx + 1 :]
+        ):
+            return False
+
+        return True
 
     def start_monitoring(self):
         """Start monitoring the event loop for blocks."""
@@ -187,13 +222,13 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
                 future.result(timeout=self.threshold * self.threshold_multiplier)
                 response_time = time.time() - start_time
                 if response_time > self.threshold:
-                    blocking_stack = self._capture_main_thread_stack()
-                    self._detect_block(response_time, blocking_stack)
+                    if blocking_stack := self._capture_main_thread_stack():
+                        self._add_block(response_time, blocking_stack)
 
             except concurrent.futures.TimeoutError:
                 response_time = time.time() - start_time
-                blocking_stack = self._capture_main_thread_stack()
-                self._detect_block(response_time, blocking_stack)
+                if blocking_stack := self._capture_main_thread_stack():
+                    self._add_block(response_time, blocking_stack)
 
             except concurrent.futures.CancelledError:
                 break
@@ -207,10 +242,10 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
         """Simple coroutine to test event loop responsiveness."""
         return time.perf_counter()
 
-    def _detect_block(
+    def _add_block(
         self,
         duration: float,
-        blocking_stack: Optional[List[traceback.FrameSummary]] = None,
+        blocking_stack: list[traceback.FrameSummary] | None = None,
     ) -> None:
         """Detect and handle a single blocking event, combining consecutive identical blocks."""
         current_time = time.time()
@@ -323,11 +358,13 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         *,
         threshold: float = 0.1,
         check_interval: float = 0.01,
+        caller_context: CallerContext | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ):
         super().__init__(action=action, logger=logger)
         self.threshold = threshold
         self.check_interval = check_interval
+        self.caller_context = caller_context
         self.loop = loop
 
     def _create_detector(self) -> _EventLoopBlockDetector:
@@ -337,6 +374,7 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
             logger=self.logger,
             threshold=self.threshold,
             check_interval=self.check_interval,
+            caller_context=self.caller_context,
             loop=self.loop,
         )
 
@@ -347,7 +385,9 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
     def __enter__(self):
         self.detector = self._create_detector()
         self.initial_resources = set()  # Not used for event loop monitoring
-        self.logger.debug("Starting event loop block monitoring")
+        self.logger.debug(
+            f"Starting event loop block monitoring for {self.caller_context}"
+        )
         self.detector.start_monitoring()
         return self
 
@@ -392,6 +432,7 @@ def no_event_loop_blocking(
     *,
     threshold: float = 0.2,
     check_interval: float = 0.05,
+    caller_context: CallerContext | None = None,
 ):
     """
     Context manager/decorator that detects event loop blocking within its scope.
@@ -423,9 +464,14 @@ def no_event_loop_blocking(
         async def my_async_function():
             requests.get("https://example.com")  # Synchronous HTTP call
     """
+
+    if caller_context is None:
+        caller_context = find_my_caller()
+
     return _EventLoopBlockContextManager(
         action=action,
         logger=logger,
         threshold=threshold,
         check_interval=check_interval,
+        caller_context=caller_context,
     )

@@ -161,4 +161,4 @@ class TestEventLoopBlockingWithHTTPRequests:
             async with no_event_loop_blocking(action="warn", threshold=0.2):
                 await my_function_using_async_client(async_client)
 
-            assert len(w) <= 1  # there might be one in the asyncio.run
+            assert len(w) == 0
