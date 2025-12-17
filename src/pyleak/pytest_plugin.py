@@ -7,6 +7,8 @@ This plugin automatically wraps tests with pyleak detectors based on pytest mark
 from __future__ import annotations
 
 import asyncio
+import inspect
+from unittest import TestCase
 
 import pytest
 
@@ -50,22 +52,51 @@ def pytest_runtest_call(item: pytest.Function):
         yield
         return
 
-    is_async = asyncio.iscoroutinefunction(item.function)
+    is_async = inspect.iscoroutinefunction(item.function)
     original_func = item.function
     caller_context = CallerContext(
         filename=item.fspath.strpath, name=item.name, lineno=None
     )
 
+    # Check if this is a TestCase-based test
+    instance = getattr(item, "instance", None)
+    is_testcase = isinstance(instance, TestCase)
+
     if is_async:
+        if is_testcase:
+            # For TestCase methods, patch the method on the instance
+            # because IsolatedAsyncioTestCase._callTestMethod retrieves
+            # the method from self, not from item.obj
+            original_method = getattr(instance, item.name)
 
-        async def async_wrapper(*args, **kwargs):
-            detector = CombinedLeakDetector(
-                config=config, is_async=True, caller_context=caller_context
-            )
-            async with detector:
-                return await original_func(*args, **kwargs)
+            async def async_wrapper_testcase():
+                detector = CombinedLeakDetector(
+                    config=config, is_async=True, caller_context=caller_context
+                )
+                async with detector:
+                    return await original_method()
 
-        item.obj = async_wrapper
+            setattr(instance, item.name, async_wrapper_testcase)
+
+            try:
+                yield
+            finally:
+                setattr(instance, item.name, original_method)
+        else:
+            # For standalone async functions, replace item.obj as before
+            async def async_wrapper(*args, **kwargs):
+                detector = CombinedLeakDetector(
+                    config=config, is_async=True, caller_context=caller_context
+                )
+                async with detector:
+                    return await original_func(*args, **kwargs)
+
+            item.obj = async_wrapper
+
+            try:
+                yield
+            finally:
+                item.obj = original_func
     else:
 
         def sync_wrapper(*args, **kwargs):
@@ -77,7 +108,7 @@ def pytest_runtest_call(item: pytest.Function):
 
         item.obj = sync_wrapper
 
-    try:
-        yield
-    finally:
-        item.obj = original_func
+        try:
+            yield
+        finally:
+            item.obj = original_func
