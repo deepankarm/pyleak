@@ -8,7 +8,7 @@ the method from self, not from item.obj.
 
 import time
 import unittest
-
+import asyncio
 import pytest
 
 from pyleak.eventloop import EventLoopBlockError
