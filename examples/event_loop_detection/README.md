@@ -30,12 +30,11 @@ Even with `async def`, the synchronous `fitz` (PyMuPDF) and `boto3` calls block 
 @pytest.mark.asyncio
 async def test_blocking_endpoint_detected(sample_pdf: bytes):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        with pytest.raises(EventLoopBlockError):
-            async with no_event_loop_blocking(action="raise", threshold=0.01):
-                await client.post("/ingest/blocking", files={"file": ("test.pdf", sample_pdf)})
+        async with no_event_loop_blocking(action="raise", threshold=0.01):
+            await client.post("/ingest/blocking", files={"file": ("test.pdf", sample_pdf)})
 ```
 
-pyleak catches the blocking and shows exactly where:
+pyleak catches the blocking and shows exactly where the blocking occurs. In this case, it's the `_upload_to_s3` function that is blocking the event loop.
 
 ```
 Event Loop Block: block-1
