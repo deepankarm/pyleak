@@ -72,7 +72,7 @@ async def ingest_async(file: UploadFile):
 
 ## Results
 
-100 concurrent requests:
+**100 concurrent requests:**
 
 ![Results for 100 requests](scripts/results_100.png)
 
@@ -88,7 +88,7 @@ Async:
 Improvement: +31% throughput, -24% p99 latency
 ```
 
-1000 concurrent requests:
+**1000 concurrent requests:**
 
 ![Results for 1000 requests](scripts/results_1000.png)
 
