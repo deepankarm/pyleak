@@ -78,14 +78,30 @@ async def ingest_async(file: UploadFile):
 
 ```
 Blocking:
-  p50: 2.00s | p95: 3.67s | p99: 3.81s
-  Throughput: 26.1 RPS
+  p50: 2.02s | p95: 3.71s | p99: 3.86s
+  Throughput: 25.8 RPS
 
 Async:
-  p50: 2.46s | p95: 2.90s | p99: 2.91s
-  Throughput: 33.8 RPS
+  p50: 2.45s | p95: 2.90s | p99: 2.93s
+  Throughput: 33.7 RPS
 
-Improvement: +30% throughput, -24% p99 latency
+Improvement: +31% throughput, -24% p99 latency
+```
+
+1000 concurrent requests:
+
+![Results for 1000 requests](scripts/results_1000.png)
+
+```
+Blocking:
+  p50: 20.70s | p95: 39.35s | p99: 41.21s
+  Throughput: 23.9 RPS
+
+Async:
+  p50: 16.08s | p95: 29.77s | p99: 30.20s
+  Throughput: 32.5 RPS
+
+Improvement: +36% throughput, -27% p99 latency
 ```
 
 ## Quick Start
