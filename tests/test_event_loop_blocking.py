@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from pyleak import EventLoopBlockError, no_event_loop_blocking
+from helpers.event_loop_wrapper import wrapped_no_event_loop_blocking
 
 pytestmark = pytest.mark.asyncio
 
@@ -162,3 +163,25 @@ class TestEventLoopBlockingWithHTTPRequests:
                 await my_function_using_async_client(async_client)
 
             assert len(w) == 0
+
+
+class TestEventLoopBlockingFromDifferentFile:
+    async def test_wrapped_context_manager_detects_blocking(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            async with wrapped_no_event_loop_blocking(action="warn"):
+                time.sleep(1)
+
+            assert len(w) >= 1
+            assert issubclass(w[0].category, ResourceWarning)
+            assert "Event loop blocked" in str(w[0].message)
+
+    async def test_wrapped_context_manager_raises_on_blocking(self):
+        with pytest.raises(EventLoopBlockError) as exc_info:
+            async with wrapped_no_event_loop_blocking(action="raise"):
+                time.sleep(1)
+
+        assert len(exc_info.value.blocking_events) == 1
+        blocking_event = exc_info.value.blocking_events[0]
+        assert blocking_event.duration > 0.0
