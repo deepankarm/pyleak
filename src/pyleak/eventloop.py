@@ -16,7 +16,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from typing import Any, Optional, Set
+from typing import Any, Optional
 
 from pyleak.base import (
     LeakAction,
@@ -167,29 +167,31 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
             self.logger.debug(f"Failed to capture main thread stack: {e}")
 
     def _matches_caller(self, stack: list[traceback.FrameSummary]) -> bool:
-        """Filter the stack to only include frames that have the original file in the filename."""
-        if not self.caller_context:
+        """Filter the stack to only include frames from the entry call chain."""
+        if not self.caller_context or not self.caller_context.files:
             return True
 
-        # If the caller is not in the stack, return False
-        if not any(frame.filename == self.caller_context.filename for frame in stack):
+        caller_files = self.caller_context.files
+        # If none of the caller files are in the blocking stack, return False
+        if not any(frame.filename in caller_files for frame in stack):
             return False
 
-        # this file might also trigger a block, so let's check if the last frame with `caller_context.filename`
-        # follows any frame with this filename `_this_file_path`. If so, return False.
-        last_caller_context_frame_idx = next(
+        # Find the last frame from any caller file
+        last_caller_frame_idx = next(
             (
                 idx
                 for idx, frame in reversed(list(enumerate(stack)))
-                if frame.filename == self.caller_context.filename
+                if frame.filename in caller_files
             ),
             None,
         )
-        if last_caller_context_frame_idx is None:
+        if last_caller_frame_idx is None:
             return False
+
+        # Check that pyleak code doesn't come after the caller's code
         if any(
             frame.filename == _this_file_path
-            for frame in stack[last_caller_context_frame_idx + 1 :]
+            for frame in stack[last_caller_frame_idx + 1 :]
         ):
             return False
 
@@ -367,14 +369,22 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         self.caller_context = caller_context
         self.loop = loop
 
-    def _create_detector(self) -> _EventLoopBlockDetector:
+    def _get_caller_context(self) -> CallerContext:
+        """Get the caller context."""
+        if self.caller_context and self.caller_context.files:
+            return self.caller_context
+        return find_my_caller()
+
+    def _create_detector(
+        self, caller_context: CallerContext
+    ) -> _EventLoopBlockDetector:
         """Create an event loop block detector instance."""
         return _EventLoopBlockDetector(
             action=self.action,
             logger=self.logger,
             threshold=self.threshold,
             check_interval=self.check_interval,
-            caller_context=self.caller_context,
+            caller_context=caller_context,
             loop=self.loop,
         )
 
@@ -383,11 +393,10 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         pass
 
     def __enter__(self):
-        self.detector = self._create_detector()
+        caller_context = self._get_caller_context()
+        self.detector = self._create_detector(caller_context)
         self.initial_resources = set()  # Not used for event loop monitoring
-        self.logger.debug(
-            f"Starting event loop block monitoring for {self.caller_context}"
-        )
+        self.logger.debug(f"Starting event loop block monitoring for {caller_context}")
         self.detector.start_monitoring()
         return self
 
@@ -442,7 +451,7 @@ def no_event_loop_blocking(
         logger: Optional logger instance
         threshold: Minimum blocking duration to report (seconds)
         check_interval: How often to check for blocks (seconds)
-        capture_stacks: Whether to capture stack traces of blocking code
+        caller_context: Optional caller context (captured automatically at entry time)
 
     Example:
         # Basic usage
@@ -452,7 +461,7 @@ def no_event_loop_blocking(
 
         # Handle blocking with detailed stack information
         try:
-            with no_event_loop_blocking(action="raise", capture_stacks=True):
+            with no_event_loop_blocking(action="raise"):
                 requests.get("https://httpbin.org/delay/1")  # Synchronous HTTP call
         except EventLoopBlockError as e:
             print(f"Event loop blocked for {e.duration:.3f}s")
@@ -464,10 +473,6 @@ def no_event_loop_blocking(
         async def my_async_function():
             requests.get("https://example.com")  # Synchronous HTTP call
     """
-
-    if caller_context is None:
-        caller_context = find_my_caller()
-
     return _EventLoopBlockContextManager(
         action=action,
         logger=logger,
