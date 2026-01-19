@@ -18,6 +18,7 @@ class CallerContext:
     filename: str
     name: str
     lineno: int | None = None
+    files: set[str] | None = None
 
     def __str__(self):
         return f"{self.filename}:{self.name}:{self.lineno or '?'}"
@@ -32,4 +33,7 @@ def find_my_caller(ignore_frames: int = 2) -> CallerContext | None:
     # 1. the first frame which is `find_my_caller` itself
     # 2. the second frame if the function that called `find_my_caller`
     frame = stack[-ignore_frames - 1]
-    return CallerContext(filename=frame.filename, name=frame.name, lineno=frame.lineno)
+    files = {f.filename for f in stack[:-ignore_frames]}
+    return CallerContext(
+        filename=frame.filename, name=frame.name, lineno=frame.lineno, files=files
+    )
