@@ -122,7 +122,7 @@ class CombinedLeakDetector:
 
     async def __aenter__(self):
         # https://github.com/deepankarm/pyleak/issues/14
-        # LIFO order: Thread -> Blocking -> Task
+        # LIFO order: Thread -> Task -> Blocking
         if self.config.threads:
             self.thread_detector = no_thread_leaks(
                 action=self.config.thread_action,
@@ -130,6 +130,14 @@ class CombinedLeakDetector:
                 exclude_daemon=self.config.exclude_daemon_threads,
             )
             self.thread_detector.__enter__()
+
+        if self.is_async and self.config.tasks:
+            self.task_detector = no_task_leaks(
+                action=self.config.task_action,
+                name_filter=self.config.task_name_filter,
+                enable_creation_tracking=self.config.enable_task_creation_tracking,
+            )
+            await self.task_detector.__aenter__()
 
         if self.is_async and self.config.blocking:
             self.blocking_detector = no_event_loop_blocking(
@@ -140,30 +148,22 @@ class CombinedLeakDetector:
             )
             self.blocking_detector.__enter__()
 
-        if self.is_async and self.config.tasks:
-            self.task_detector = no_task_leaks(
-                action=self.config.task_action,
-                name_filter=self.config.task_name_filter,
-                enable_creation_tracking=self.config.enable_task_creation_tracking,
-            )
-            await self.task_detector.__aenter__()
-
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # LIFO order: Task -> Blocking -> Thread (see #14)
+        # LIFO order: Blocking -> Task -> Thread
         leak_errors = []
-
-        if self.task_detector:
-            try:
-                await self.task_detector.__aexit__(exc_type, exc_val, exc_tb)
-            except TaskLeakError as e:
-                leak_errors.append(e)
 
         if self.blocking_detector:
             try:
                 self.blocking_detector.__exit__(exc_type, exc_val, exc_tb)
             except EventLoopBlockError as e:
+                leak_errors.append(e)
+
+        if self.task_detector:
+            try:
+                await self.task_detector.__aexit__(exc_type, exc_val, exc_tb)
+            except TaskLeakError as e:
                 leak_errors.append(e)
 
         if self.thread_detector:
