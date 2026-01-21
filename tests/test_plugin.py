@@ -63,3 +63,27 @@ async def test_task_leak_detected_no_blocking():
     """This test should pass as we only capture tasks"""
     await asyncio.create_task(asyncio.sleep(0.1))  # no tasks leak
     time.sleep(0.5)  # intentionally block the event loop
+
+
+# Regression tests for issue #14: CombinedLeakDetector false positives
+
+
+@pytest.mark.no_leaks(tasks=True, threads=False, blocking=True)
+@pytest.mark.asyncio
+async def test_no_false_positive_ping_event_loop_task():
+    """Task detector should not detect blocking detector's internal _ping_event_loop task."""
+    await asyncio.sleep(0.01)
+
+
+@pytest.mark.no_leaks(tasks=False, threads=True, blocking=True, blocking_threshold=0.05)
+@pytest.mark.asyncio
+async def test_no_false_positive_thread_grace_period_block():
+    """Blocking detector should not detect thread detector's grace_period sleep."""
+    await asyncio.sleep(0.01)
+
+
+@pytest.mark.no_leaks(tasks=True, threads=True, blocking=True, blocking_threshold=0.05)
+@pytest.mark.asyncio
+async def test_combined_detector_no_false_positives():
+    """All detectors enabled should not cause false positives from interactions."""
+    await asyncio.sleep(0.01)
