@@ -6,7 +6,7 @@ This plugin automatically wraps tests with pyleak detectors based on pytest mark
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 
 import pytest
 
@@ -41,16 +41,21 @@ def should_monitor_test(item: pytest.Function) -> PyLeakConfig | None:
     return PyLeakConfig.from_marker_args(marker_args)
 
 
-@pytest.hookimpl(hookwrapper=True)
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_runtest_call(item: pytest.Function):
-    """Wrap test execution with leak detection"""
+    """Wrap test execution with leak detection.
+
+    tryfirst=True ensures pyleak wraps item.obj before other async runner
+    plugins (e.g. pytest-trio, pytest-asyncio) consume it, so the leak
+    detector runs inside the correct event loop.
+    """
 
     config = should_monitor_test(item)
     if not config:
         yield
         return
 
-    is_async = asyncio.iscoroutinefunction(item.function)
+    is_async = inspect.iscoroutinefunction(item.function)
     original_func = item.function
     caller_context = CallerContext(
         filename=item.fspath.strpath, name=item.name, lineno=None

@@ -7,16 +7,16 @@ and capture stack traces showing exactly what's blocking.
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
+import inspect
 import logging
 import os
 import sys
 import threading
 import time
 import traceback
+from concurrent.futures import CancelledError, Future, TimeoutError
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from pyleak.base import (
     LeakAction,
@@ -109,13 +109,13 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
         threshold: float = 0.1,
         check_interval: float = 0.01,
         caller_context: CallerContext | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
+        schedule_callback: Callable[[Callable], None] | None = None,
     ):
         super().__init__(action=action, logger=logger)
         self.threshold = threshold
         self.check_interval = check_interval
         self.caller_context = caller_context
-        self.loop = loop or asyncio.get_running_loop()
+        self.schedule_callback = schedule_callback
 
         self.monitoring = False
         self.threshold_multiplier = 1
@@ -129,7 +129,7 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
         """Get block description."""
         return "event loop block"
 
-    def get_running_resources(self, exclude_current: bool = True) -> Set[dict]:
+    def get_running_resources(self, exclude_current: bool = True) -> set[dict]:
         """Get current blocks (returns empty set as we track blocks differently)."""
         return set()
 
@@ -213,36 +213,38 @@ class _EventLoopBlockDetector(_BaseLeakDetector):
             if self.monitor_thread.exception:
                 raise self.monitor_thread.exception
 
+    @staticmethod
+    def _set_future_result(future: Future) -> None:
+        """Callback scheduled on the event loop to signal responsiveness."""
+        if not future.done():
+            future.set_result(time.perf_counter())
+
     def _monitor_loop(self):
         """Monitor thread that checks event loop responsiveness."""
         while self.monitoring:
             start_time = time.time()
-            future = asyncio.run_coroutine_threadsafe(
-                self._ping_event_loop(), self.loop
-            )
+            future = Future[float]()
             try:
+                self.schedule_callback(self._set_future_result, future)
                 future.result(timeout=self.threshold * self.threshold_multiplier)
                 response_time = time.time() - start_time
                 if response_time > self.threshold:
                     if blocking_stack := self._capture_main_thread_stack():
                         self._add_block(response_time, blocking_stack)
 
-            except concurrent.futures.TimeoutError:
+            except TimeoutError:
                 response_time = time.time() - start_time
+                future.cancel()
                 if blocking_stack := self._capture_main_thread_stack():
                     self._add_block(response_time, blocking_stack)
 
-            except concurrent.futures.CancelledError:
+            except CancelledError:
                 break
 
             except Exception as e:
                 self.logger.error(f"Event loop monitoring error: {e}", exc_info=True)
 
             time.sleep(self.check_interval)
-
-    async def _ping_event_loop(self):
-        """Simple coroutine to test event loop responsiveness."""
-        return time.perf_counter()
 
     def _add_block(
         self,
@@ -361,13 +363,11 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         threshold: float = 0.1,
         check_interval: float = 0.01,
         caller_context: CallerContext | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
     ):
         super().__init__(action=action, logger=logger)
         self.threshold = threshold
         self.check_interval = check_interval
         self.caller_context = caller_context
-        self.loop = loop
 
     def _get_caller_context(self) -> CallerContext:
         """Get the caller context."""
@@ -385,14 +385,39 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
             threshold=self.threshold,
             check_interval=self.check_interval,
             caller_context=caller_context,
-            loop=self.loop,
+            schedule_callback=self._get_schedule_callback(),
         )
 
     def _wait_for_completion(self) -> None:
         """Wait for monitoring to complete (stop the monitor thread)."""
         pass
 
+    @staticmethod
+    def _get_schedule_callback() -> Callable[[Callable], None]:
+        """Detect the current async library and return the appropriate schedule callback."""
+        import sniffio
+
+        library = sniffio.current_async_library()
+        if library == "trio":
+            import trio.lowlevel
+
+            return trio.lowlevel.current_trio_token().run_sync_soon
+        else:
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            return loop.call_soon_threadsafe
+
     def __enter__(self):
+        raise RuntimeError(
+            "no_event_loop_blocking must be used as an async context manager "
+            "(async with) or as a decorator on an async function"
+        )
+
+    def __exit__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
         caller_context = self._get_caller_context()
         self.detector = self._create_detector(caller_context)
         self.initial_resources = set()  # Not used for event loop monitoring
@@ -400,7 +425,7 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         self.detector.start_monitoring()
         return self
 
-    def __exit__(self, *args, **kwargs):
+    async def __aexit__(self, *args, **kwargs):
         self.detector.stop_monitoring()
         self.detector.handle_detected_blocks()
         summary = self.detector.get_summary()
@@ -412,24 +437,18 @@ class _EventLoopBlockContextManager(_BaseLeakContextManager):
         else:
             self.logger.debug("No event loop blocks detected")
 
-    async def __aenter__(self):
-        return self.__enter__()
-
-    async def __aexit__(self, *args, **kwargs):
-        self.__exit__(*args, **kwargs)
-
     def __call__(self, func):
         """Allow this context manager to be used as a decorator."""
         import functools
 
-        if not asyncio.iscoroutinefunction(func):
+        if not inspect.iscoroutinefunction(func):
             raise ValueError(
                 "no_event_loop_blocking can only be used with async functions"
             )
 
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            with self:
+            async with self:
                 return await func(*args, **kwargs)
 
         return wrapper

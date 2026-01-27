@@ -146,7 +146,7 @@ class CombinedLeakDetector:
                 check_interval=self.config.blocking_check_interval,
                 caller_context=self.caller_context,
             )
-            self.blocking_detector.__enter__()
+            await self.blocking_detector.__aenter__()
 
         return self
 
@@ -156,7 +156,7 @@ class CombinedLeakDetector:
 
         if self.blocking_detector:
             try:
-                self.blocking_detector.__exit__(exc_type, exc_val, exc_tb)
+                await self.blocking_detector.__aexit__(exc_type, exc_val, exc_tb)
             except EventLoopBlockError as e:
                 leak_errors.append(e)
 
