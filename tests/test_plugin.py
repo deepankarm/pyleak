@@ -3,6 +3,10 @@ import threading
 import time
 
 import pytest
+import sniffio
+import trio
+
+from exceptiongroup import BaseExceptionGroup
 
 from pyleak import PyleakExceptionGroup
 
@@ -87,3 +91,40 @@ async def test_no_false_positive_thread_grace_period_block():
 async def test_combined_detector_no_false_positives():
     """All detectors enabled should not cause false positives from interactions."""
     await asyncio.sleep(0.01)
+
+
+# Trio plugin tests
+
+
+@pytest.mark.no_leaks(tasks=False, threads=False, blocking=False)
+@pytest.mark.trio
+async def test_trio_no_leaks():
+    """Test trio function with no leaks and all detectors disabled."""
+    assert sniffio.current_async_library() == "trio"
+    await trio.sleep(0.01)
+
+
+@pytest.mark.no_leaks(tasks=False, threads=True, blocking=True)
+@pytest.mark.trio
+async def test_trio_no_leaks_threads_and_blocking():
+    """Test trio function with thread and blocking detection enabled, no issues."""
+    assert sniffio.current_async_library() == "trio"
+    await trio.sleep(0.01)
+
+
+@pytest.mark.xfail(raises=(PyleakExceptionGroup, BaseExceptionGroup))
+@pytest.mark.no_leaks(tasks=False, threads=True, blocking=False)
+@pytest.mark.trio
+async def test_trio_thread_leak_detected():
+    """This test should fail due to thread leak under trio."""
+    assert sniffio.current_async_library() == "trio"
+    threading.Thread(target=lambda: time.sleep(10)).start()
+
+
+@pytest.mark.xfail(raises=(PyleakExceptionGroup, BaseExceptionGroup))
+@pytest.mark.no_leaks(tasks=False, threads=False, blocking=True)
+@pytest.mark.trio
+async def test_trio_blocking_detected():
+    """This test should fail due to blocking under trio."""
+    assert sniffio.current_async_library() == "trio"
+    time.sleep(0.5)
