@@ -30,7 +30,7 @@ def sync_main():
 
 # Detect event loop blocking
 async def async_main():
-    with no_event_loop_blocking():
+    async with no_event_loop_blocking():
         time.sleep(0.5)  # This will be detected
 ```
 
@@ -53,7 +53,7 @@ with no_thread_leaks():
 
 # Event loop blocking (async context only)
 async def main():
-    with no_event_loop_blocking():
+    async with no_event_loop_blocking():
         # Your potentially blocking code here
         pass
 ```
@@ -255,7 +255,7 @@ async with no_task_leaks(action="cancel"):  # Cancels leaked tasks
 with no_thread_leaks(action="raise"):  # Raises exception on thread leaks
     pass
 
-with no_event_loop_blocking(action="log"):  # Logs blocking events
+async with no_event_loop_blocking(action="log"):  # Logs blocking events
     pass
 ```
 
@@ -333,7 +333,7 @@ def test_no_leaked_threads():
 
 @pytest.mark.asyncio        
 async def test_no_event_loop_blocking():
-    with no_event_loop_blocking(action="raise", threshold=0.1):
+    async with no_event_loop_blocking(action="raise", threshold=0.1):
         await my_potentially_blocking_function()
 ```
 
@@ -347,11 +347,11 @@ from starlette.testclient import TestClient
 
 async def test_sync_vs_async_http():
     # This will detect blocking
-    with no_event_loop_blocking(action="warn"):
+    async with no_event_loop_blocking(action="warn"):
         response = TestClient(app).get("/endpoint")  # Synchronous!
-        
-    # This will not detect blocking  
-    with no_event_loop_blocking(action="warn"):
+
+    # This will not detect blocking
+    async with no_event_loop_blocking(action="warn"):
         async with httpx.AsyncClient() as client:
             response = await client.get("/endpoint")  # Asynchronous!
 ```
